@@ -74,7 +74,6 @@ func formatReset(_ isoString: String) -> String {
     formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
 
     guard let date = formatter.date(from: isoString) else {
-        // Try without fractional seconds
         formatter.formatOptions = [.withInternetDateTime]
         guard let date = formatter.date(from: isoString) else { return "?" }
         return formatResetDate(date)
@@ -114,9 +113,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var extraItem: NSMenuItem!
     var updatedItem: NSMenuItem!
 
+    // Refresh interval items
+    var interval1mItem: NSMenuItem!
+    var interval5mItem: NSMenuItem!
+    var interval30mItem: NSMenuItem!
+    var interval1hItem: NSMenuItem!
+
+    // Current interval in seconds
+    var refreshInterval: TimeInterval = 300 {
+        didSet {
+            UserDefaults.standard.set(refreshInterval, forKey: "refreshInterval")
+            updateIntervalMenu()
+            restartTimer()
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Hide dock icon
         NSApp.setActivationPolicy(.accessory)
+
+        // Load saved interval
+        let saved = UserDefaults.standard.double(forKey: "refreshInterval")
+        if saved > 0 {
+            refreshInterval = saved
+        }
 
         // Create status item
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -140,18 +160,61 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(updatedItem)
         menu.addItem(NSMenuItem(title: "Refresh", action: #selector(refresh), keyEquivalent: "r"))
         menu.addItem(NSMenuItem.separator())
+
+        // Settings submenu
+        let settingsMenu = NSMenu()
+        interval1mItem = NSMenuItem(title: "Every 1 minute", action: #selector(setInterval1m), keyEquivalent: "")
+        interval5mItem = NSMenuItem(title: "Every 5 minutes", action: #selector(setInterval5m), keyEquivalent: "")
+        interval30mItem = NSMenuItem(title: "Every 30 minutes", action: #selector(setInterval30m), keyEquivalent: "")
+        interval1hItem = NSMenuItem(title: "Every hour", action: #selector(setInterval1h), keyEquivalent: "")
+
+        interval1mItem.target = self
+        interval5mItem.target = self
+        interval30mItem.target = self
+        interval1hItem.target = self
+
+        settingsMenu.addItem(interval1mItem)
+        settingsMenu.addItem(interval5mItem)
+        settingsMenu.addItem(interval30mItem)
+        settingsMenu.addItem(interval1hItem)
+
+        let settingsItem = NSMenuItem(title: "Refresh Interval", action: nil, keyEquivalent: "")
+        settingsItem.submenu = settingsMenu
+        menu.addItem(settingsItem)
+
+        menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q"))
 
         statusItem.menu = menu
 
+        // Update checkmarks
+        updateIntervalMenu()
+
         // Initial fetch
         refresh()
 
-        // Auto-refresh every 5 minutes
-        timer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
+        // Start timer
+        restartTimer()
+    }
+
+    func updateIntervalMenu() {
+        interval1mItem.state = refreshInterval == 60 ? .on : .off
+        interval5mItem.state = refreshInterval == 300 ? .on : .off
+        interval30mItem.state = refreshInterval == 1800 ? .on : .off
+        interval1hItem.state = refreshInterval == 3600 ? .on : .off
+    }
+
+    func restartTimer() {
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
             self?.refresh()
         }
     }
+
+    @objc func setInterval1m() { refreshInterval = 60 }
+    @objc func setInterval5m() { refreshInterval = 300 }
+    @objc func setInterval30m() { refreshInterval = 1800 }
+    @objc func setInterval1h() { refreshInterval = 3600 }
 
     @objc func refresh() {
         DispatchQueue.main.async {
