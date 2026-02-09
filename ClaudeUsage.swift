@@ -11,7 +11,7 @@ struct UsageResponse: Codable {
 
 struct UsageLimit: Codable {
     let utilization: Double
-    let resets_at: String
+    let resets_at: String?
 }
 
 struct ExtraUsage: Codable {
@@ -57,7 +57,7 @@ func fetchUsage(token: String, completion: @escaping (UsageResponse?) -> Void) {
     var request = URLRequest(url: url)
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-    request.setValue("claude-code/2.0.31", forHTTPHeaderField: "User-Agent")
+    request.setValue("claude-code/2.1.34", forHTTPHeaderField: "User-Agent")
 
     URLSession.shared.dataTask(with: request) { data, _, _ in
         guard let data = data,
@@ -245,17 +245,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let h = usage.five_hour {
             let pct = Int(h.utilization)
             statusItem.button?.title = "\(pct)%"
-            fiveHourItem.title = "5-hour: \(pct)% (resets \(formatReset(h.resets_at)))"
+            let reset = h.resets_at.map { formatReset($0) } ?? "--"
+            fiveHourItem.title = "5-hour: \(pct)% (resets \(reset))"
         }
 
         // Weekly
         if let d = usage.seven_day {
-            weeklyItem.title = "Weekly: \(Int(d.utilization))% (resets \(formatReset(d.resets_at)))"
+            let reset = d.resets_at.map { formatReset($0) } ?? "--"
+            weeklyItem.title = "Weekly: \(Int(d.utilization))% (resets \(reset))"
         }
 
         // Sonnet
         if let s = usage.seven_day_sonnet {
-            sonnetItem.title = "Sonnet: \(Int(s.utilization))% (resets \(formatReset(s.resets_at)))"
+            let reset = s.resets_at.map { formatReset($0) } ?? "--"
+            sonnetItem.title = "Sonnet: \(Int(s.utilization))% (resets \(reset))"
         } else {
             sonnetItem.title = "Sonnet: --"
         }
