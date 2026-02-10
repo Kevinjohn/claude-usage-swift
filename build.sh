@@ -25,9 +25,9 @@ cat > ClaudeUsage.app/Contents/Info.plist << 'EOF'
     <key>CFBundleName</key>
     <string>Claude Usage</string>
     <key>CFBundleVersion</key>
-    <string>2.1.1</string>
+    <string>2.1.2</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.1.1</string>
+    <string>2.1.2</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>

@@ -562,14 +562,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func setMenuBarText(_ text: String, color: NSColor? = nil) {
         guard let button = statusItem.button else { return }
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         if let color = color {
-            let font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
             button.attributedTitle = NSAttributedString(string: text, attributes: [
                 .foregroundColor: color,
                 .font: font
             ])
         } else {
-            button.attributedTitle = NSAttributedString(string: text)
+            button.attributedTitle = NSAttributedString(string: text, attributes: [
+                .font: font
+            ])
         }
     }
 
