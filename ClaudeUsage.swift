@@ -149,7 +149,7 @@ func fetchUsage(token: String) async throws -> UsageResponse {
     var request = URLRequest(url: url)
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-    request.setValue("ClaudeUsage-menubar/1.0", forHTTPHeaderField: "User-Agent")
+    request.setValue("ClaudeUsage-menubar/2.1", forHTTPHeaderField: "User-Agent")
 
     let (data, response): (Data, URLResponse)
     do {
@@ -270,6 +270,49 @@ func computeRateString() -> String? {
     return String(format: "~%.0f%%/hr — limit in ~%dh at this pace", ratePerHour, hrs)
 }
 
+// MARK: - Model Detection
+
+func readActiveModel() -> String? {
+    let claudeJson = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude.json")
+    guard let data = try? Data(contentsOf: claudeJson),
+          let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let projects = root["projects"] as? [String: Any] else {
+        return nil
+    }
+
+    var modelTotals: [String: Int] = [:]
+    for (_, projectValue) in projects {
+        guard let project = projectValue as? [String: Any],
+              let modelUsage = project["lastModelUsage"] as? [String: Any] else {
+            continue
+        }
+        for (modelId, usageValue) in modelUsage {
+            guard let usage = usageValue as? [String: Any],
+                  let output = usage["outputTokens"] as? Int else {
+                continue
+            }
+            modelTotals[modelId, default: 0] += output
+        }
+    }
+
+    guard let topModel = modelTotals.max(by: { $0.value < $1.value })?.key else {
+        return nil
+    }
+    return shortModelName(topModel)
+}
+
+func shortModelName(_ modelId: String) -> String {
+    let parts = modelId.lowercased().split(separator: "-")
+    let families = ["opus", "sonnet", "haiku"]
+    for part in parts {
+        if families.contains(String(part)) {
+            return String(part).prefix(1).uppercased() + String(part).dropFirst()
+        }
+    }
+    // Fallback: return first 12 chars of the ID
+    return String(modelId.prefix(12))
+}
+
 // MARK: - App Delegate
 
 class AppDelegate: NSObject, NSApplicationDelegate {
@@ -283,8 +326,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var fiveHourResetString: String?
     var testModeActive = false
     var isRefreshing = false
+    var activeModelName: String?
 
     // Menu items
+    var modelItem: NSMenuItem!
     var fiveHourItem: NSMenuItem!
     var weeklyItem: NSMenuItem!
     var sonnetItem: NSMenuItem!
@@ -297,6 +342,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Launch at login
     var launchAtLoginItem: NSMenuItem!
+
+    // Show Model in Menu Bar
+    var showModelItem: NSMenuItem!
+    var showModelInMenuBar: Bool {
+        get { UserDefaults.standard.object(forKey: "showModelInMenuBar") as? Bool ?? false }
+        set { UserDefaults.standard.set(newValue, forKey: "showModelInMenuBar") }
+    }
 
     // Usage Alerts
     var alertsItem: NSMenuItem!
@@ -330,6 +382,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Create menu
         menu = NSMenu()
 
+        modelItem = NSMenuItem(title: "Model: --", action: nil, keyEquivalent: "")
         fiveHourItem = NSMenuItem(title: "5-hour: ...", action: nil, keyEquivalent: "")
         weeklyItem = NSMenuItem(title: "Weekly: ...", action: nil, keyEquivalent: "")
         sonnetItem = NSMenuItem(title: "Sonnet: ...", action: nil, keyEquivalent: "")
@@ -338,6 +391,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         rateItem.isHidden = true
         updatedItem = NSMenuItem(title: "Updated: --", action: nil, keyEquivalent: "")
 
+        menu.addItem(modelItem)
         menu.addItem(fiveHourItem)
         menu.addItem(rateItem)
         menu.addItem(weeklyItem)
@@ -386,6 +440,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         alertsItem.target = self
         alertsItem.state = notificationsEnabled ? .on : .off
         menu.addItem(alertsItem)
+
+        // Show Model toggle
+        showModelItem = NSMenuItem(title: "Display model name", action: #selector(toggleShowModel), keyEquivalent: "")
+        showModelItem.target = self
+        showModelItem.state = showModelInMenuBar ? .on : .off
+        menu.addItem(showModelItem)
 
         if #available(macOS 13.0, *) {
             launchAtLoginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
@@ -480,7 +540,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             do {
                 let token = try await getOAuthToken()
                 let usage = try await fetchUsage(token: token)
+                let model = readActiveModel()
                 await MainActor.run {
+                    self.activeModelName = model
                     self.updateUI(usage: usage)
                     self.isRefreshing = false
                 }
@@ -535,7 +597,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         guard let pct = fiveHourPct else { return }
-        var (text, color) = generateMenuBarText(pct: pct, resetString: fiveHourResetString)
+        let prefix = (showModelInMenuBar ? activeModelName.map { "\($0): " } : nil) ?? ""
+        var (text, color) = generateMenuBarText(pct: pct, resetString: fiveHourResetString, prefix: prefix)
 
         // Stale data indicator
         if let lastFetch = lastSuccessfulFetch, Date().timeIntervalSince(lastFetch) > refreshInterval * 2 {
@@ -560,6 +623,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func updateUI(usage: UsageResponse) {
+        // Model
+        if let model = activeModelName {
+            modelItem.title = "Model: \(model)"
+            modelItem.isHidden = false
+        } else {
+            modelItem.isHidden = true
+        }
+
         // 5-hour
         if let h = usage.five_hour {
             let pct = Int(h.utilization)
@@ -667,6 +738,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         alertsItem.state = notificationsEnabled ? .on : .off
     }
 
+    @objc func toggleShowModel() {
+        showModelInMenuBar.toggle()
+        showModelItem.state = showModelInMenuBar ? .on : .off
+        updateMenuBarText()
+    }
+
     @objc func openDashboard() {
         if let url = URL(string: "https://console.anthropic.com/settings/usage") {
             NSWorkspace.shared.open(url)
@@ -674,7 +751,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func copyUsage() {
-        var lines = [fiveHourItem, weeklyItem, sonnetItem, extraItem]
+        var lines: [String] = []
+        if !modelItem.isHidden { lines.append(modelItem.title) }
+        lines += [fiveHourItem, weeklyItem, sonnetItem, extraItem]
             .compactMap { $0?.title }
         if !rateItem.isHidden {
             lines.append(rateItem.title)
