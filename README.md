@@ -8,23 +8,25 @@ A lightweight native macOS menu bar app that displays your Claude usage limits a
 
 ## Features
 
-- **Live usage percentage** in menu bar (5-hour session)
-- **Hover countdown** - hover over the percentage to see time until reset with a typewriter animation (hours with ¼½¾ fractions, then minutes and seconds)
+- **Live usage percentage** in menu bar with inline reset countdown
+- **Color-coded status** — grey (<30%), green (30–60%), yellow (61–80%), orange (81–90%), red (91%+)
+- **Adaptive display** — low usage shows percentage only; moderate adds hours; high shows full countdown
 - **5-hour session** usage with reset countdown
 - **Weekly limits** with reset date
 - **Sonnet-specific** weekly limit tracking
 - **Extra usage** spending ($X/$Y format)
-- **Auto-refresh** every 1, 5, 30, or 60 minutes
-- **Native Swift** - no Python, no dependencies
-- **Lightweight** - ~50 MB RAM (vs ~90 MB Python version)
+- **Auto-refresh** every 1, 5, 15, 30, or 60 minutes (default: 15 min)
+- **Launch at Login** — toggle in menu (macOS 13+, uses SMAppService)
+- **Open Dashboard** — quick link to Anthropic usage console
+- **Copy Usage** — copy all usage stats to clipboard
+- **Test Display** — preview color thresholds at 10/40/75/85/95%
+- **Specific error indicators** — `key?`, `net?`, `auth?` etc. instead of generic `?`
+- **Native Swift** — no Python, no dependencies
+- **Lightweight** — ~50 MB RAM (vs ~90 MB Python version)
 
 ## Screenshot
 
 ![Claude Usage Tracker](screenshot.png)
-
-### Hover Countdown
-
-![Hover countdown demo](hover-demo.gif)
 
 ## Requirements
 
@@ -36,7 +38,7 @@ A lightweight native macOS menu bar app that displays your Claude usage limits a
 
 ### Option 1: Download Release (Easiest)
 
-1. Download `ClaudeUsage.app.zip` from [Releases](https://github.com/cfranci/claude-usage-swift/releases)
+1. Download `ClaudeUsage.app.zip` from [Releases](https://github.com/Kevinjohn/claude-usage-swift/releases)
 2. Unzip and drag to `/Applications`
 3. Double-click to run
 4. If macOS blocks it: **System Settings → Privacy & Security → Open Anyway**
@@ -44,7 +46,7 @@ A lightweight native macOS menu bar app that displays your Claude usage limits a
 ### Option 2: Build from Source
 
 ```bash
-git clone https://github.com/cfranci/claude-usage-swift.git
+git clone https://github.com/Kevinjohn/claude-usage-swift.git
 cd claude-usage-swift
 ./build.sh
 open ClaudeUsage.app
@@ -53,7 +55,7 @@ open ClaudeUsage.app
 Or manually:
 
 ```bash
-swiftc -o ClaudeUsage.app/Contents/MacOS/ClaudeUsage ClaudeUsage.swift -framework Cocoa
+swiftc -O -o ClaudeUsage.app/Contents/MacOS/ClaudeUsage ClaudeUsage.swift -framework Cocoa -framework UserNotifications
 open ClaudeUsage.app
 ```
 
@@ -69,26 +71,48 @@ The usage API is free - no tokens consumed.
 
 ## Auto-Start at Login
 
+**Option 1 (macOS 13+):** Toggle **Launch at Login** in the app's menu.
+
+**Option 2 (manual):**
 1. Open **System Settings → General → Login Items**
 2. Click **+** under "Open at Login"
 3. Select `ClaudeUsage.app`
 
 ## Troubleshooting
 
-### "?" in menu bar
+### Error indicators in menu bar
+
+| Indicator | Meaning |
+|-----------|---------|
+| `key?` | Keychain entry not found — Claude Code not installed or not logged in |
+| `net?` | Network error — check your internet connection |
+| `auth?` | Authentication failed (HTTP 401/403) — try logging into Claude Code again |
+| `http?` | Other HTTP error from Anthropic API |
+| `json?` | API response could not be decoded |
+
+Click the menu bar item to see a detailed error message in the dropdown.
+
+### Older "?" in menu bar
+
 - Make sure Claude Code is installed and logged in
 - Run `claude` in terminal to verify
 
 ### App won't open (macOS security)
+
 - Go to **System Settings → Privacy & Security**
 - Find "ClaudeUsage was blocked" and click **Open Anyway**
 
 ### Building fails
+
 - Ensure Xcode Command Line Tools: `xcode-select --install`
 
 ## Python Version
 
 Looking for the Python version? See [claude-usage-tracker](https://github.com/cfranci/claude-usage-tracker).
+
+## Acknowledgements
+
+This project is a fork of [claude-usage-swift](https://github.com/cfranci/claude-usage-swift) by [cfranci](https://github.com/cfranci). Thank you for the original implementation.
 
 ## License
 

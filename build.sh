@@ -9,7 +9,7 @@ echo "Building ClaudeUsage..."
 mkdir -p ClaudeUsage.app/Contents/MacOS
 
 # Compile
-swiftc -O -o ClaudeUsage.app/Contents/MacOS/ClaudeUsage ClaudeUsage.swift -framework Cocoa
+swiftc -O -o ClaudeUsage.app/Contents/MacOS/ClaudeUsage ClaudeUsage.swift -framework Cocoa -framework UserNotifications
 
 # Create Info.plist if not exists
 if [ ! -f ClaudeUsage.app/Contents/Info.plist ]; then
@@ -40,5 +40,8 @@ cat > ClaudeUsage.app/Contents/Info.plist << 'EOF'
 </plist>
 EOF
 fi
+
+# Ad-hoc code signing
+codesign --sign - --force ClaudeUsage.app
 
 echo "Done! Run with: open ClaudeUsage.app"
