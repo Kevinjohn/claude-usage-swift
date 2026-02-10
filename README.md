@@ -8,12 +8,13 @@ A lightweight native macOS menu bar app that displays your Claude usage limits a
 
 ## Features
 
-- **Live usage percentage** in menu bar (5-hour session) & Hover for time left till reset
+- **Live usage percentage** in menu bar (5-hour session)
+- **Hover countdown** - hover over the percentage to see time until reset with a typewriter animation (hours with ¼½¾ fractions, then minutes and seconds)
 - **5-hour session** usage with reset countdown
 - **Weekly limits** with reset date
 - **Sonnet-specific** weekly limit tracking
 - **Extra usage** spending ($X/$Y format)
-- **Auto-refresh** every 1,5,30,60 minutes
+- **Auto-refresh** every 1, 5, 30, or 60 minutes
 - **Native Swift** - no Python, no dependencies
 - **Lightweight** - ~50 MB RAM (vs ~90 MB Python version)
 

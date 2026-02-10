@@ -99,12 +99,53 @@ func formatResetDate(_ date: Date) -> String {
     }
 }
 
+func formatResetTooltip(_ date: Date) -> String {
+    let diff = date.timeIntervalSince(Date())
+    if diff < 0 { return "now" }
+
+    let totalSeconds = Int(diff)
+    let hours = totalSeconds / 3600
+    let mins = (totalSeconds % 3600) / 60
+    let secs = totalSeconds % 60
+
+    if hours >= 1 {
+        // Show hours with quarter fractions
+        let fractionalHours = diff / 3600.0
+        let wholeHours = Int(fractionalHours)
+        let remainder = fractionalHours - Double(wholeHours)
+
+        let fraction: String
+        if remainder >= 0.875 {
+            return "\(wholeHours + 1)h"
+        } else if remainder >= 0.625 {
+            fraction = "\u{00BE}" // ¾
+        } else if remainder >= 0.375 {
+            fraction = "\u{00BD}" // ½
+        } else if remainder >= 0.125 {
+            fraction = "\u{00BC}" // ¼
+        } else {
+            fraction = ""
+        }
+        return "\(wholeHours)\(fraction)h"
+    } else {
+        return "\(mins)m \(secs)s"
+    }
+}
+
 // MARK: - App Delegate
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem!
     var menu: NSMenu!
     var timer: Timer?
+    var hoverTimer: Timer?
+
+    // Store state for hover
+    var fiveHourResetDate: Date?
+    var currentPct: String = "..."
+    var isHovering = false
+    var isAnimating = false
+    var animTimer: Timer?
 
     // Menu items
     var fiveHourItem: NSMenuItem!
@@ -131,12 +172,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Hide dock icon
         NSApp.setActivationPolicy(.accessory)
-
-        // Load saved interval
-        let saved = UserDefaults.standard.double(forKey: "refreshInterval")
-        if saved > 0 {
-            refreshInterval = saved
-        }
 
         // Create status item
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -185,7 +220,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q"))
 
-        statusItem.menu = menu
+        // Don't set statusItem.menu — handle click manually so hover tracking works
+        statusItem.button?.target = self
+        statusItem.button?.action = #selector(statusItemClicked)
+        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+
+        // Load saved interval (must be after menu items are created)
+        let saved = UserDefaults.standard.double(forKey: "refreshInterval")
+        if saved > 0 {
+            refreshInterval = saved
+        }
 
         // Update checkmarks
         updateIntervalMenu()
@@ -195,6 +239,71 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Start timer
         restartTimer()
+
+        // Poll mouse position to detect hover over status item
+        hoverTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
+            self?.checkHover()
+        }
+    }
+
+    func checkHover() {
+        guard let button = statusItem.button,
+              let window = button.window else { return }
+
+        let mouseLocation = NSEvent.mouseLocation
+        let buttonScreenFrame = window.convertToScreen(button.convert(button.bounds, to: nil))
+        let wasHovering = isHovering
+        isHovering = buttonScreenFrame.contains(mouseLocation)
+
+        if isHovering && !wasHovering && !isAnimating {
+            // Mouse entered — animate to countdown
+            guard let resetDate = fiveHourResetDate else { return }
+            let target = formatResetTooltip(resetDate)
+            animateTitle(to: target)
+        } else if !isHovering && wasHovering && !isAnimating {
+            // Mouse exited — animate back to percentage
+            animateTitle(to: currentPct)
+        } else if isHovering && !isAnimating {
+            // Keep updating the countdown while hovering (no animation, just swap)
+            guard let resetDate = fiveHourResetDate else { return }
+            statusItem.button?.title = formatResetTooltip(resetDate)
+        }
+    }
+
+    func animateTitle(to newText: String) {
+        isAnimating = true
+        animTimer?.invalidate()
+
+        let currentText = statusItem.button?.title ?? ""
+        var chars = Array(currentText)
+        var step = 0
+        let newChars = Array(newText)
+        let deleteCount = chars.count
+        let totalSteps = deleteCount + newChars.count
+
+        animTimer = Timer.scheduledTimer(withTimeInterval: 0.035, repeats: true) { [weak self] timer in
+            guard let self = self else { timer.invalidate(); return }
+
+            if step < deleteCount {
+                // Delete phase: remove last character
+                chars.removeLast()
+                self.statusItem.button?.title = chars.isEmpty ? " " : String(chars)
+            } else {
+                // Type phase: add next character
+                let typeIndex = step - deleteCount
+                if typeIndex < newChars.count {
+                    let partial = String(newChars[0...typeIndex])
+                    self.statusItem.button?.title = partial
+                }
+            }
+
+            step += 1
+            if step >= totalSteps {
+                timer.invalidate()
+                self.statusItem.button?.title = newText
+                self.isAnimating = false
+            }
+        }
     }
 
     func updateIntervalMenu() {
@@ -209,6 +318,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         timer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
             self?.refresh()
         }
+    }
+
+    @objc func statusItemClicked() {
+        guard let button = statusItem.button else { return }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height + 5), in: button)
     }
 
     @objc func setInterval1m() { refreshInterval = 60 }
@@ -244,9 +358,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 5-hour
         if let h = usage.five_hour {
             let pct = Int(h.utilization)
-            statusItem.button?.title = "\(pct)%"
+            currentPct = "\(pct)%"
+            if !isHovering {
+                statusItem.button?.title = currentPct
+            }
             let reset = h.resets_at.map { formatReset($0) } ?? "--"
             fiveHourItem.title = "5-hour: \(pct)% (resets \(reset))"
+
+            // Store reset date for hover display
+            if let resetStr = h.resets_at {
+                let formatter = ISO8601DateFormatter()
+                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                if let date = formatter.date(from: resetStr) {
+                    fiveHourResetDate = date
+                } else {
+                    formatter.formatOptions = [.withInternetDateTime]
+                    fiveHourResetDate = formatter.date(from: resetStr)
+                }
+            }
         }
 
         // Weekly
