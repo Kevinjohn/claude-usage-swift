@@ -149,7 +149,7 @@ func fetchUsage(token: String) async throws -> UsageResponse {
     var request = URLRequest(url: url)
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-    request.setValue("ClaudeUsage-menubar/2.1", forHTTPHeaderField: "User-Agent")
+    request.setValue("ClaudeUsage-menubar/2.1.1", forHTTPHeaderField: "User-Agent")
 
     let (data, response): (Data, URLResponse)
     do {
@@ -306,7 +306,7 @@ func shortModelName(_ modelId: String) -> String {
     let families = ["opus", "sonnet", "haiku"]
     for part in parts {
         if families.contains(String(part)) {
-            return String(part).prefix(1).uppercased() + String(part).dropFirst()
+            return String(part)
         }
     }
     // Fallback: return first 12 chars of the ID
