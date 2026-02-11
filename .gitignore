@@ -3,6 +3,9 @@ ClaudeUsage.app/
 *.o
 *.d
 
+# Claude Code
+.claude/
+
 # macOS
 .DS_Store
 .AppleDouble

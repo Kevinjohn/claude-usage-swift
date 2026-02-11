@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented here.
 
+## [v2.2.2] - 2026-02-11
+
+### Improved
+- Cache `ISO8601DateFormatter` and `DateFormatter` at module level to avoid repeated allocation on every refresh cycle
+- Single source of truth for version string — `appVersion` constant in Swift, extracted by `build.sh` into Info.plist
+- Replace force-unwraps in `computeRateString()` with `guard let` for safer idiomatic Swift
+- Extract menu construction from `applicationDidFinishLaunching` into `buildMenu()` for readability
+- Build script now always regenerates Info.plist so version bumps take effect without manual deletion
+- Add `.claude/` to `.gitignore`
+
 ## [v2.2.1] - 2026-02-11
 
 ### Changed
@@ -65,6 +75,7 @@ All notable changes to this project are documented here.
 - 5-hour and weekly limit display
 - Keychain-based authentication via Claude Code credentials
 
+[v2.2.2]: https://github.com/Kevinjohn/claude-usage-swift/releases/tag/v2.2.2
 [v2.2.1]: https://github.com/Kevinjohn/claude-usage-swift/releases/tag/v2.2.1
 [v2.2.0]: https://github.com/Kevinjohn/claude-usage-swift/releases/tag/v2.2.0
 [v2.1.2]: https://github.com/Kevinjohn/claude-usage-swift/releases/tag/v2.1.2

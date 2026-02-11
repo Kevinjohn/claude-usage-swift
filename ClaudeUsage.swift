@@ -2,6 +2,10 @@ import Cocoa
 import ServiceManagement
 import UserNotifications
 
+// MARK: - Version
+
+private let appVersion = "2.2.2"
+
 // MARK: - Usage API
 
 struct UsageResponse: Codable {
@@ -93,14 +97,31 @@ enum UsageError: Error, CustomStringConvertible {
     }
 }
 
+// MARK: - Cached Date Formatters
+
+private let iso8601FractionalFormatter: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return f
+}()
+
+private let iso8601Formatter: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime]
+    return f
+}()
+
+private let dateOnlyFormatter: DateFormatter = {
+    let f = DateFormatter()
+    f.dateFormat = "MMM d"
+    return f
+}()
+
 // MARK: - Shared Date Parser
 
 func parseISO8601(_ string: String) -> Date? {
-    let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    if let date = formatter.date(from: string) { return date }
-    formatter.formatOptions = [.withInternetDateTime]
-    return formatter.date(from: string)
+    if let date = iso8601FractionalFormatter.date(from: string) { return date }
+    return iso8601Formatter.date(from: string)
 }
 
 // MARK: - Networking (async)
@@ -149,7 +170,7 @@ func fetchUsage(token: String) async throws -> UsageResponse {
     var request = URLRequest(url: url)
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-    request.setValue("ClaudeUsage-menubar/2.2.1", forHTTPHeaderField: "User-Agent")
+    request.setValue("ClaudeUsage-menubar/\(appVersion)", forHTTPHeaderField: "User-Agent")
 
     let (data, response): (Data, URLResponse)
     do {
@@ -192,9 +213,7 @@ func formatResetDate(_ date: Date, hoursOnly: Bool = false) -> String {
             return "\(hours)h \(mins)m"
         }
     } else {
-        let df = DateFormatter()
-        df.dateFormat = "MMM d"
-        return df.string(from: date)
+        return dateOnlyFormatter.string(from: date)
     }
 }
 
@@ -244,10 +263,9 @@ func saveSnapshot(pct: Double) {
 
 func computeRateString() -> String? {
     let snapshots = loadSnapshots()
-    guard snapshots.count >= 2 else { return nil }
-
-    let first = snapshots.first!
-    let last = snapshots.last!
+    guard snapshots.count >= 2,
+          let first = snapshots.first,
+          let last = snapshots.last else { return nil }
     let elapsed = last.timestamp - first.timestamp
     guard elapsed >= 300 else { return nil } // Need 5+ minutes
 
@@ -413,8 +431,50 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         setMenuBarText("...")
 
-        // Create menu
-        menu = NSMenu()
+        // Build and attach menu
+        menu = buildMenu()
+        statusItem.menu = menu
+
+        // Restore saved refresh interval
+        let stored = UserDefaults.standard.double(forKey: "refreshInterval")
+        if stored > 0 { refreshInterval = stored }
+
+        // Initialize dynamic refresh state
+        if dynamicRefreshEnabled {
+            let ladder = effectiveDynamicLadder
+            dynamicTierIndex = ladder.count  // At base rate (user's interval)
+            dynamicPreviousPct = nil
+            dynamicUnchangedCount = 0
+            dynamicStatusIcon = "↻"
+        }
+
+        // Update checkmarks
+        updateIntervalMenu()
+        updateDynamicStatusItem()
+
+        // Request notification authorization
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+
+        // Initial fetch
+        refresh()
+
+        // Start timer
+        restartTimer()
+
+        // Update menu bar countdown and relative time every 60s (display only, no API calls)
+        displayTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            self?.updateMenuBarText()
+            self?.updateRelativeTime()
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        timer?.invalidate()
+        displayTimer?.invalidate()
+    }
+
+    private func buildMenu() -> NSMenu {
+        let menu = NSMenu()
 
         modelItem = NSMenuItem(title: "Model: --", action: nil, keyEquivalent: "")
         fiveHourItem = NSMenuItem(title: "5-hour: ...", action: nil, keyEquivalent: "")
@@ -529,44 +589,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q"))
 
-        statusItem.menu = menu
-
-        // Restore saved refresh interval
-        let stored = UserDefaults.standard.double(forKey: "refreshInterval")
-        if stored > 0 { refreshInterval = stored }
-
-        // Initialize dynamic refresh state
-        if dynamicRefreshEnabled {
-            let ladder = effectiveDynamicLadder
-            dynamicTierIndex = ladder.count  // At base rate (user's interval)
-            dynamicPreviousPct = nil
-            dynamicUnchangedCount = 0
-            dynamicStatusIcon = "↻"
-        }
-
-        // Update checkmarks
-        updateIntervalMenu()
-        updateDynamicStatusItem()
-
-        // Request notification authorization
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
-
-        // Initial fetch
-        refresh()
-
-        // Start timer
-        restartTimer()
-
-        // Update menu bar countdown and relative time every 60s (display only, no API calls)
-        displayTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            self?.updateMenuBarText()
-            self?.updateRelativeTime()
-        }
-    }
-
-    func applicationWillTerminate(_ notification: Notification) {
-        timer?.invalidate()
-        displayTimer?.invalidate()
+        return menu
     }
 
     func updateIntervalMenu() {
@@ -894,7 +917,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         var lines: [String] = []
         if !modelItem.isHidden { lines.append(modelItem.title) }
         lines += [fiveHourItem, weeklyItem, sonnetItem, extraItem]
-            .compactMap { $0?.title }
+            .map { $0.title }
         if !rateItem.isHidden {
             lines.append(rateItem.title)
         }

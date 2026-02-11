@@ -12,7 +12,7 @@ A native macOS menu bar app that displays Claude API usage limits and reset time
 ./build.sh
 ```
 
-This compiles `ClaudeUsage.swift` with `swiftc -O` linking the Cocoa and UserNotifications frameworks, creates the `.app` bundle structure, generates `Info.plist` if missing, and applies ad-hoc code signing. Output: `ClaudeUsage.app/`.
+This compiles `ClaudeUsage.swift` with `swiftc -O` linking the Cocoa and UserNotifications frameworks, creates the `.app` bundle structure, extracts the version from `appVersion` in the Swift source, regenerates `Info.plist`, and applies ad-hoc code signing. Output: `ClaudeUsage.app/`.
 
 Manual build alternative:
 ```bash
@@ -23,13 +23,15 @@ Requires macOS 12.0+, Swift 5.9+, and Xcode Command Line Tools.
 
 ## Architecture
 
-Everything lives in `ClaudeUsage.swift` (~800 lines), organized as:
+Everything lives in `ClaudeUsage.swift` (~960 lines), organized as:
 
+- **Version constant**: `appVersion` — single source of truth for version string, extracted by `build.sh` into Info.plist
 - **Data models** (top): `UsageResponse`, `UsageLimit`, `ExtraUsage` — Codable structs matching the Anthropic OAuth usage API response; `UsageSnapshot` for tracking usage history
 - **`DisplayThresholds` struct**: centralised static config for color breakpoints (30/61/81/91%), countdown detail thresholds (30/61%), and alert thresholds (80/90%)
 - **Ephemeral URLSession**: module-level `urlSession` using `URLSessionConfiguration.ephemeral` to prevent disk caching of API responses
 - **`UsageError` enum**: structured error type with cases `keychainNotFound`, `keychainParseFailure`, `networkError`, `httpError`, `decodingError` — each provides a `menuBarText` (e.g. `"key?"`, `"net?"`, `"auth?"`) and a `description` for the dropdown menu
-- **Shared date parser**: `parseISO8601()` handles both fractional-seconds and plain ISO8601 formats in one place
+- **Cached date formatters**: module-level `iso8601FractionalFormatter`, `iso8601Formatter`, `dateOnlyFormatter` — avoids repeated allocation of expensive formatters
+- **Shared date parser**: `parseISO8601()` handles both fractional-seconds and plain ISO8601 formats using cached formatters
 - **Networking (async)**: `getOAuthToken()` runs `/usr/bin/security` on a background queue via `withCheckedThrowingContinuation` to avoid blocking the main thread; `fetchUsage()` uses `urlSession.data(for:)` — both throw `UsageError`
 - **Formatting helpers**: `formatReset()`, `formatResetDate(_:hoursOnly:)`, `formatResetHoursOnly()` — convert ISO8601 timestamps to human-readable countdowns; `formatResetDate` accepts a `hoursOnly` parameter to share logic between full and abbreviated formats
 - **Color helper**: `colorForPercentage()` maps usage percentage to NSColor using `DisplayThresholds` breakpoints — grey (<30%), green (30–60%), yellow (61–80%), orange (81–90%), red (91%+)
@@ -37,6 +39,7 @@ Everything lives in `ClaudeUsage.swift` (~800 lines), organized as:
 - **Model detection**: `readActiveModel()` reads `~/.claude.json` to find the most-used model across projects; `shortModelName()` converts full model IDs (e.g. `claude-opus-4-6`) to short lowercase names (`opus`, `sonnet`, `haiku`)
 - **Dynamic refresh ladder**: module-level `dynamicRefreshLadder` constant `[60, 120, 300, 900]` — tiers for adaptive polling
 - **AppDelegate**: NSApplicationDelegate managing the NSStatusItem (menu bar), dropdown NSMenu, refresh timer, display timer (60s countdown updates), test display mode, launch-at-login toggle, usage alerts, rate display, model display, stale data indicator, dynamic refresh, and `showError()` for structured error display
+  - `buildMenu()` — constructs the full dropdown NSMenu (extracted from `applicationDidFinishLaunching` for readability)
   - `setMenuBarText(_:color:)` — sets menu bar text with 11pt monospaced-digit font and optional color
   - `generateMenuBarText(pct:resetString:prefix:suffix:)` — shared method for menu bar text generation used by both `updateMenuBarText()` and `testPercentage()`; `suffix` appends dynamic status icon when enabled
   - Interval items built via loop with `item.tag = seconds` and single `setInterval(_:)` handler

@@ -5,15 +5,18 @@ set -e
 
 echo "Building ClaudeUsage..."
 
+# Extract version from Swift source (single source of truth)
+VERSION=$(grep 'let appVersion' ClaudeUsage.swift | sed 's/.*"\(.*\)".*/\1/')
+echo "Version: $VERSION"
+
 # Create app bundle structure
 mkdir -p ClaudeUsage.app/Contents/MacOS
 
 # Compile
 swiftc -O -o ClaudeUsage.app/Contents/MacOS/ClaudeUsage ClaudeUsage.swift -framework Cocoa -framework UserNotifications
 
-# Create Info.plist if not exists
-if [ ! -f ClaudeUsage.app/Contents/Info.plist ]; then
-cat > ClaudeUsage.app/Contents/Info.plist << 'EOF'
+# Always regenerate Info.plist so version bumps take effect
+cat > ClaudeUsage.app/Contents/Info.plist << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -25,9 +28,9 @@ cat > ClaudeUsage.app/Contents/Info.plist << 'EOF'
     <key>CFBundleName</key>
     <string>Claude Usage</string>
     <key>CFBundleVersion</key>
-    <string>2.2.1</string>
+    <string>$VERSION</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.2.1</string>
+    <string>$VERSION</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>
@@ -39,7 +42,6 @@ cat > ClaudeUsage.app/Contents/Info.plist << 'EOF'
 </dict>
 </plist>
 EOF
-fi
 
 # Ad-hoc code signing
 codesign --sign - --force ClaudeUsage.app
