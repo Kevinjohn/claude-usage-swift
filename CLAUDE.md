@@ -27,7 +27,7 @@ Everything lives in `ClaudeUsage.swift` (~1000 lines), organized as:
 
 - **Version constant**: `appVersion` — single source of truth for version string, extracted by `build.sh` into Info.plist
 - **Data models** (top): `UsageResponse`, `UsageLimit`, `ExtraUsage` — Codable structs matching the Anthropic OAuth usage API response; `UsageSnapshot` for tracking usage history
-- **`DisplayThresholds` struct**: centralised static config for color breakpoints (30/61/81/91%), countdown detail thresholds (30/61%), and alert thresholds (80/90%)
+- **`DisplayThresholds` struct**: centralised static config for color breakpoints (30/61/81/91%) and countdown detail thresholds (30/61%)
 - **Ephemeral URLSession**: module-level `urlSession` using `URLSessionConfiguration.ephemeral` to prevent disk caching of API responses
 - **`UsageError` enum**: structured error type with cases `keychainNotFound`, `keychainParseFailure`, `networkError`, `httpError`, `decodingError` — each provides a `menuBarText` (e.g. `"key?"`, `"net?"`, `"auth?"`) and a `description` for the dropdown menu
 - **Cached date formatters**: module-level `iso8601FractionalFormatter`, `iso8601Formatter`, `dateOnlyFormatter` — avoids repeated allocation of expensive formatters
@@ -43,7 +43,7 @@ Everything lives in `ClaudeUsage.swift` (~1000 lines), organized as:
   - **Menu Construction**: `buildMenu()` — constructs the full dropdown NSMenu
   - **Refresh & Timer**: `updateIntervalMenu()`, `restartTimer()`, `adjustDynamicInterval(newPct:)` (core dynamic refresh logic: steps down on usage increase, steps up after 2 unchanged cycles), `updateDynamicStatusItem()`, `toggleDynamicRefresh()`, `setInterval(_:)`, `refresh()`, `updateUI(usage:)`
   - **Display**: `setMenuBarText(_:color:)` (11pt monospaced-digit font), `tabbedMenuItemString(left:right:)` (creates `NSAttributedString` with left-aligned tab stop for column-aligned reset times in dropdown), `generateMenuBarText(pct:resetString:prefix:suffix:)` (shared by `updateMenuBarText()` and `testPercentage()`), `updateMenuBarText()`, `showError(_:)`, `updateRelativeTime()`
-  - **Alerts**: currently disabled (TODO at top of file to revisit with predictive/rate-based alerts)
+  - **Alerts**: `sendResetNotification(category:)` fires a macOS notification when a usage category resets to 0%; `toggleResetNotifications()` toggles the "Notifications > Reset to 0%" menu item
   - **User Actions**: `toggleShowModel()`, `openDashboard()`, `copyUsage()`, `toggleLaunchAtLogin()`, `testPercentage(_:)`, `clearTestDisplay()`, `quit()`
   - `effectiveInterval` — computed property returning `refreshInterval` when dynamic is off, or the current tier interval when on
   - `effectiveDynamicLadder` — filters `dynamicRefreshLadder` to tiers strictly less than `refreshInterval`; at idle the timer uses the user's base interval
@@ -57,7 +57,7 @@ Key design decisions:
 - A `displayTimer` (60s) updates the countdown text and relative time between API refreshes
 - Stale data indicator: appends "(stale)" to menu bar text when last successful fetch was > 2x refresh interval ago
 - Usage rate tracking: snapshots stored in UserDefaults, pruned to 6h / 100 entries, cleared on reset cycle change
-- Threshold alerts: currently disabled (TODO to revisit with predictive/rate-based alerts)
+- Reset notifications: macOS notifications when any category drops from >0% to 0%, toggled via "Notifications > Reset to 0%" submenu (default off)
 - Test Display submenu lets you preview color thresholds at 10/40/75/85/95%
 - "Display model name" toggle prepends active model to menu bar text (e.g. `opus: 45%`), persisted via UserDefaults
 - Launch at Login via SMAppService (macOS 13+)

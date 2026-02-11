@@ -1,11 +1,10 @@
 import Cocoa
 import ServiceManagement
-// TODO: Revisit UserNotifications usage alerts when they can provide more value (e.g. predictive alerts, rate-based warnings)
-// import UserNotifications
+import UserNotifications
 
 // MARK: - Version
 
-private let appVersion = "2.2.7"
+private let appVersion = "2.3.0"
 
 // MARK: - Usage API
 
@@ -43,7 +42,6 @@ struct DisplayThresholds {
     static let showHoursOnly    = 30  // at/above: show hours-only countdown
     static let showFullCountdown = 61  // at/above: show full h:m countdown
 
-    // Notification alert thresholds — currently disabled (see TODO at top of file)
 }
 
 // MARK: - Usage Snapshot
@@ -379,7 +377,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         set { UserDefaults.standard.set(newValue, forKey: "showModelInMenuBar") }
     }
 
-    // Usage Alerts — currently disabled (see TODO at top of file)
+    // Reset notifications
+    var resetNotifyItem: NSMenuItem!
+    var resetNotificationsEnabled: Bool {
+        get { UserDefaults.standard.object(forKey: "resetNotificationsEnabled") as? Bool ?? false }
+        set { UserDefaults.standard.set(newValue, forKey: "resetNotificationsEnabled") }
+    }
+    var previousWeeklyPct: Int?
+    var previousSonnetPct: Int?
+    var previousExtraPct: Int?
 
     // Stale data tracking
     var lastSuccessfulFetch: Date?
@@ -449,6 +455,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             dynamicUnchangedCount = 0
             dynamicStatusIcon = "↻"
         }
+
+        // Request notification permission so reset alerts can fire
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
 
         // Update checkmarks
         updateIntervalMenu()
@@ -549,6 +558,16 @@ extension AppDelegate {
         showModelItem.target = self
         showModelItem.state = showModelInMenuBar ? .on : .off
         menu.addItem(showModelItem)
+
+        // Notifications submenu
+        let notificationsMenu = NSMenu()
+        resetNotifyItem = NSMenuItem(title: "Reset to 0%", action: #selector(toggleResetNotifications), keyEquivalent: "")
+        resetNotifyItem.target = self
+        resetNotifyItem.state = resetNotificationsEnabled ? .on : .off
+        notificationsMenu.addItem(resetNotifyItem)
+        let notificationsItem = NSMenuItem(title: "Notifications", action: nil, keyEquivalent: "")
+        notificationsItem.submenu = notificationsMenu
+        menu.addItem(notificationsItem)
 
         if #available(macOS 13.0, *) {
             launchAtLoginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
@@ -715,6 +734,7 @@ extension AppDelegate {
         // 5-hour
         if let h = usage.five_hour {
             let pct = Int(h.utilization)
+            if let prev = fiveHourPct, prev > 0, pct == 0 { sendResetNotification(category: "5-hour") }
             fiveHourPct = pct
             fiveHourResetString = h.resets_at
             updateMenuBarText()
@@ -758,16 +778,22 @@ extension AppDelegate {
 
         // Weekly
         if let d = usage.seven_day {
+            let weeklyPct = Int(d.utilization)
+            if let prev = previousWeeklyPct, prev > 0, weeklyPct == 0 { sendResetNotification(category: "Weekly") }
+            previousWeeklyPct = weeklyPct
             let reset = d.resets_at.map { formatReset($0) } ?? "--"
-            weeklyItem.title = "Weekly: \(Int(d.utilization))% (resets \(reset))"
-            weeklyItem.attributedTitle = tabbedMenuItemString(left: "Weekly: \(Int(d.utilization))%", right: "(resets \(reset))")
+            weeklyItem.title = "Weekly: \(weeklyPct)% (resets \(reset))"
+            weeklyItem.attributedTitle = tabbedMenuItemString(left: "Weekly: \(weeklyPct)%", right: "(resets \(reset))")
         }
 
         // Sonnet
         if let s = usage.seven_day_sonnet {
+            let sonnetPct = Int(s.utilization)
+            if let prev = previousSonnetPct, prev > 0, sonnetPct == 0 { sendResetNotification(category: "Sonnet") }
+            previousSonnetPct = sonnetPct
             let reset = s.resets_at.map { formatReset($0) } ?? "--"
-            sonnetItem.title = "Sonnet: \(Int(s.utilization))% (resets \(reset))"
-            sonnetItem.attributedTitle = tabbedMenuItemString(left: "Sonnet: \(Int(s.utilization))%", right: "(resets \(reset))")
+            sonnetItem.title = "Sonnet: \(sonnetPct)% (resets \(reset))"
+            sonnetItem.attributedTitle = tabbedMenuItemString(left: "Sonnet: \(sonnetPct)%", right: "(resets \(reset))")
         } else {
             sonnetItem.title = "Sonnet: --"
             sonnetItem.attributedTitle = nil
@@ -776,6 +802,9 @@ extension AppDelegate {
         // Extra (API returns cents, display as dollars)
         if let e = usage.extra_usage, e.is_enabled,
            let used = e.used_credits, let limit = e.monthly_limit, let util = e.utilization {
+            let extraPct = Int(util)
+            if let prev = previousExtraPct, prev > 0, extraPct == 0 { sendResetNotification(category: "Extra") }
+            previousExtraPct = extraPct
             let leftExtra = String(format: "Extra: $%.2f/$%.0f", used / 100, limit / 100)
             let rightExtra = String(format: "(%.0f%%)", util)
             extraItem.title = "\(leftExtra) \(rightExtra)"
@@ -896,7 +925,26 @@ extension AppDelegate {
     }
 }
 
-// MARK: - Alerts (disabled — see TODO at top of file)
+// MARK: - Alerts
+
+extension AppDelegate {
+    func sendResetNotification(category: String) {
+        guard resetNotificationsEnabled else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Usage Reset"
+        content.body = "\(category) usage has reset to 0%"
+        content.sound = .default
+        let request = UNNotificationRequest(
+            identifier: "reset-\(category)-\(Date().timeIntervalSince1970)",
+            content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
+    }
+
+    @objc func toggleResetNotifications() {
+        resetNotificationsEnabled.toggle()
+        resetNotifyItem.state = resetNotificationsEnabled ? .on : .off
+    }
+}
 
 // MARK: - User Actions
 

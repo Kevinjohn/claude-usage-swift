@@ -13,7 +13,7 @@ echo "Version: $VERSION"
 mkdir -p ClaudeUsage.app/Contents/MacOS
 
 # Compile
-swiftc -O -o ClaudeUsage.app/Contents/MacOS/ClaudeUsage ClaudeUsage.swift -framework Cocoa
+swiftc -O -o ClaudeUsage.app/Contents/MacOS/ClaudeUsage ClaudeUsage.swift -framework Cocoa -framework UserNotifications
 
 # Always regenerate Info.plist so version bumps take effect
 cat > ClaudeUsage.app/Contents/Info.plist << EOF
