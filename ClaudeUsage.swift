@@ -4,7 +4,7 @@ import UserNotifications
 
 // MARK: - Version
 
-private let appVersion = "2.2.5"
+private let appVersion = "2.2.6"
 
 // MARK: - Usage API
 
@@ -358,7 +358,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var activeModelName: String?
 
     // Menu items
-    var modelItem: NSMenuItem!
+    // modelItem removed — static "Claude Code usage:" header used instead
     var fiveHourItem: NSMenuItem!
     var weeklyItem: NSMenuItem!
     var sonnetItem: NSMenuItem!
@@ -488,7 +488,7 @@ extension AppDelegate {
     private func buildMenu() -> NSMenu {
         let menu = NSMenu()
 
-        modelItem = NSMenuItem(title: "Model: --", action: nil, keyEquivalent: "")
+        let headerItem = NSMenuItem(title: "Claude Code usage:", action: nil, keyEquivalent: "")
         fiveHourItem = NSMenuItem(title: "5-hour: ...", action: nil, keyEquivalent: "")
         weeklyItem = NSMenuItem(title: "Weekly: ...", action: nil, keyEquivalent: "")
         sonnetItem = NSMenuItem(title: "Sonnet: ...", action: nil, keyEquivalent: "")
@@ -497,7 +497,8 @@ extension AppDelegate {
         rateItem.isHidden = true
         updatedItem = NSMenuItem(title: "Updated: --", action: nil, keyEquivalent: "")
 
-        menu.addItem(modelItem)
+        menu.addItem(headerItem)
+        menu.addItem(NSMenuItem.separator())
         menu.addItem(fiveHourItem)
         menu.addItem(rateItem)
         menu.addItem(weeklyItem)
@@ -726,14 +727,6 @@ extension AppDelegate {
     }
 
     func updateUI(usage: UsageResponse) {
-        // Model
-        if let model = activeModelName {
-            modelItem.title = "Model: \(model)"
-            modelItem.isHidden = false
-        } else {
-            modelItem.isHidden = true
-        }
-
         // 5-hour
         if let h = usage.five_hour {
             let pct = Int(h.utilization)
@@ -969,7 +962,6 @@ extension AppDelegate {
 
     @objc func copyUsage() {
         var lines: [String] = []
-        if !modelItem.isHidden { lines.append(modelItem.title) }
         lines += [fiveHourItem, weeklyItem, sonnetItem, extraItem]
             .map { $0.title }
         if !rateItem.isHidden {

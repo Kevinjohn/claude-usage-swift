@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here.
 
+## [v2.2.6] - 2026-02-11
+
+### Changed
+- Replace dynamic "Model: opus" header with static "Claude Code usage:" title and separator
+
+### Removed
+- `modelItem` property and dynamic model display in dropdown (model name still available in menu bar via "Display model name" toggle)
+
 ## [v2.2.5] - 2026-02-11
 
 ### Improved
