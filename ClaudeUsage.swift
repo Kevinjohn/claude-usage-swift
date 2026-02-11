@@ -149,7 +149,7 @@ func fetchUsage(token: String) async throws -> UsageResponse {
     var request = URLRequest(url: url)
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-    request.setValue("ClaudeUsage-menubar/2.1.1", forHTTPHeaderField: "User-Agent")
+    request.setValue("ClaudeUsage-menubar/2.1.2", forHTTPHeaderField: "User-Agent")
 
     let (data, response): (Data, URLResponse)
     do {

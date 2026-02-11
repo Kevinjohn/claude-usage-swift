@@ -1,49 +1,70 @@
-# Claude Usage Tracker (Swift)
+# Claude Usage — macOS Menu Bar App
 
-A lightweight native macOS menu bar app that displays your Claude usage limits and reset times.
+A native macOS menu bar app that shows your Claude API usage, reset countdowns, and rate tracking at a glance.
 
 ![macOS](https://img.shields.io/badge/macOS-12.0+-blue)
 ![Swift](https://img.shields.io/badge/Swift-5.9+-orange)
 ![Memory](https://img.shields.io/badge/RAM-~50MB-green)
 
+## Screenshot / Demo
+
+![Claude Usage dropdown](screenshot.png)
+
+![Hover countdown demo](hover-demo.gif)
+
 ## Features
 
-- **Live usage percentage** in menu bar with inline reset countdown
-- **Color-coded status** — grey (<30%), green (30–60%), yellow (61–80%), orange (81–90%), red (91%+)
-- **Adaptive display** — low usage shows percentage only; moderate adds hours; high shows full countdown
-- **5-hour session** usage with reset countdown
-- **Weekly limits** with reset date
-- **Sonnet-specific** weekly limit tracking
-- **Extra usage** spending ($X/$Y format)
-- **Auto-refresh** every 1, 5, 15, 30, or 60 minutes (default: 15 min)
-- **Launch at Login** — toggle in menu (macOS 13+, uses SMAppService)
-- **Open Dashboard** — quick link to Anthropic usage console
-- **Copy Usage** — copy all usage stats to clipboard
-- **Test Display** — preview color thresholds at 10/40/75/85/95%
-- **Specific error indicators** — `key?`, `net?`, `auth?` etc. instead of generic `?`
-- **Native Swift** — no Python, no dependencies
-- **Lightweight** — ~50 MB RAM (vs ~90 MB Python version)
+**Menu Bar Display**
+- Live usage percentage with color-coded status
+- Adaptive countdown — low usage shows percentage only, moderate adds hours, high shows full h:m countdown
+- Stale data indicator when the last fetch exceeds 2x the refresh interval
+- Optional active model name prefix (e.g. `opus: 45% / 2h 30m`)
 
-## Screenshot
+**Usage Tracking**
+- 5-hour session usage with reset countdown
+- Weekly limits with reset date
+- Sonnet-specific weekly limit tracking
+- Extra/pay-as-you-go spending (`$XX/$YY (ZZ%)`)
 
-![Claude Usage Tracker](screenshot.png)
+**Smart Details**
+- Usage rate display (`~X%/hr`) with estimated time to limit
+- Active model detection from `~/.claude.json`
+- Relative "last updated" timestamp (`Updated just now`, `3m ago`, etc.)
+
+**Alerts**
+- Push notifications at 80% and 90% usage thresholds (once per reset cycle)
+- Toggle on/off from the dropdown menu
+
+**Preferences**
+- Refresh interval: 1, 5, 15, 30, or 60 minutes (default: 15 min)
+- Launch at Login (macOS 13+, via SMAppService)
+- Display model name toggle
+
+**Utilities**
+- Copy all usage stats to clipboard
+- Open Anthropic usage dashboard
+- Test Display mode — preview color thresholds at 10/40/75/85/95%
+
+**Lightweight**
+- Single Swift file, zero dependencies, no Xcode project
+- Compiled with `swiftc`, ad-hoc signed
+- ~50 MB RAM footprint
 
 ## Requirements
 
 - macOS 12.0+
 - [Claude Code](https://claude.ai/code) installed and logged in
-- Claude Pro or Max subscription
 
-## Installation
+## Install
 
-### Option 1: Download Release (Easiest)
+### Download Release
 
 1. Download `ClaudeUsage.app.zip` from [Releases](https://github.com/Kevinjohn/claude-usage-swift/releases)
 2. Unzip and drag to `/Applications`
 3. Double-click to run
-4. If macOS blocks it: **System Settings → Privacy & Security → Open Anyway**
+4. If macOS blocks it: **System Settings > Privacy & Security > Open Anyway**
 
-### Option 2: Build from Source
+### Build from Source
 
 ```bash
 git clone https://github.com/Kevinjohn/claude-usage-swift.git
@@ -61,59 +82,70 @@ open ClaudeUsage.app
 
 ## How It Works
 
-The app reads Claude Code's OAuth credentials from macOS Keychain and queries the Anthropic usage API:
+The app reads Claude Code's OAuth credentials from the macOS Keychain and queries the Anthropic usage API. 
+No tokens are consumed — the usage endpoint is free.
 
 1. Reads token from Keychain (`Claude Code-credentials`)
 2. Calls `api.anthropic.com/api/oauth/usage`
-3. Displays utilization percentages and reset times
+3. Parses utilization percentages and reset times
+4. Displays in the menu bar and dropdown
 
-The usage API is free - no tokens consumed.
+## Menu Bar Guide
 
-## Auto-Start at Login
+### Color Thresholds
 
-**Option 1 (macOS 13+):** Toggle **Launch at Login** in the app's menu.
+| Color  | Usage Range | Meaning         |
+|--------|-------------|-----------------|
+| Grey   | 0–29%       | Low usage       |
+| Green  | 30–60%      | Moderate usage  |
+| Yellow | 61–80%      | Elevated usage  |
+| Orange | 81–90%      | High usage      |
+| Red    | 91–100%     | Near limit      |
 
-**Option 2 (manual):**
-1. Open **System Settings → General → Login Items**
-2. Click **+** under "Open at Login"
-3. Select `ClaudeUsage.app`
+### Adaptive Display
 
-## Troubleshooting
+The menu bar adjusts detail based on how close you are to your limit:
 
-### Error indicators in menu bar
+| Usage Range | Display                | Example              |
+|-------------|------------------------|----------------------|
+| < 30%       | Percentage only        | `45%`                |
+| 30–60%      | Percentage + hours     | `45% / 2h`          |
+| 61%+        | Percentage + full time | `78% / 2h 30m`      |
 
-| Indicator | Meaning |
-|-----------|---------|
-| `key?` | Keychain entry not found — Claude Code not installed or not logged in |
-| `net?` | Network error — check your internet connection |
-| `auth?` | Authentication failed (HTTP 401/403) — try logging into Claude Code again |
-| `http?` | Other HTTP error from Anthropic API |
-| `json?` | API response could not be decoded |
+With model display enabled, the model name is prepended: `opus: 45% / 2h 30m`
+
+## Error Indicators
+
+If something goes wrong, the menu bar shows a short code instead of usage:
+
+| Indicator | Meaning                                                    |
+|-----------|------------------------------------------------------------|
+| `key?`    | Keychain entry not found — Claude Code not installed or not logged in |
+| `net?`    | Network error — check your internet connection             |
+| `auth?`   | Authentication failed (HTTP 401/403) — try logging into Claude Code again |
+| `http?`   | Other HTTP error from Anthropic API                        |
+| `json?`   | API response could not be decoded                          |
 
 Click the menu bar item to see a detailed error message in the dropdown.
 
-### Older "?" in menu bar
-
-- Make sure Claude Code is installed and logged in
-- Run `claude` in terminal to verify
+## Troubleshooting
 
 ### App won't open (macOS security)
 
-- Go to **System Settings → Privacy & Security**
-- Find "ClaudeUsage was blocked" and click **Open Anyway**
+Go to **System Settings > Privacy & Security**, find "ClaudeUsage was blocked", and click **Open Anyway**.
 
-### Building fails
+### Build fails
 
-- Ensure Xcode Command Line Tools: `xcode-select --install`
+Ensure Xcode Command Line Tools are installed:
 
-## Python Version
-
-Looking for the Python version? See [claude-usage-tracker](https://github.com/cfranci/claude-usage-tracker).
+```bash
+xcode-select --install
+```
 
 ## Acknowledgements
 
-This project is a fork of [claude-usage-swift](https://github.com/cfranci/claude-usage-swift) by [cfranci](https://github.com/cfranci). Thank you for the original implementation.
+Built on the original work by [cfranci](https://github.com/cfranci) ([claude-usage-tracker](https://github.com/cfranci/claude-usage-tracker)).
 
 ## License
 
-MIT
+[MIT](LICENSE)
