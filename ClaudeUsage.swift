@@ -474,6 +474,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.updateMenuBarText()
             self?.updateRelativeTime()
         }
+        displayTimer?.tolerance = 10  // Let macOS coalesce with other wake-ups
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -624,6 +625,7 @@ extension AppDelegate {
         timer = Timer.scheduledTimer(withTimeInterval: effectiveInterval, repeats: true) { [weak self] _ in
             self?.refresh()
         }
+        timer?.tolerance = max(10, effectiveInterval * 0.1)  // 10% tolerance, min 10s
     }
 
     func adjustDynamicInterval(newPct: Int) {
