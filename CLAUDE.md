@@ -38,10 +38,10 @@ Everything lives in `ClaudeUsage.swift` (~1000 lines), organized as:
 - **Snapshot helpers**: `loadSnapshots()`, `saveSnapshot(pct:)`, `computeRateString()` — track usage over time, compute %/hr rate and estimated time to limit
 - **Model detection**: `readActiveModel()` reads `~/.claude.json` to find the most-used model across projects; `shortModelName()` converts full model IDs (e.g. `claude-opus-4-6`) to short lowercase names (`opus`, `sonnet`, `haiku`)
 - **Dynamic refresh ladder**: module-level `dynamicRefreshLadder` constant `[60, 120, 300, 900]` — tiers for adaptive polling
-- **AppDelegate** (main class): all stored/computed properties, `applicationDidFinishLaunching`, `applicationWillTerminate`
+- **AppDelegate** (main class): all stored/computed properties, `applicationDidFinishLaunching`, `applicationWillTerminate`, `startDisplayTimer()`, `handleSleep()`, `handleWake()`
 - **AppDelegate extensions** (5 logical groups, each with `// MARK: -` for Xcode jump-bar navigation):
   - **Menu Construction**: `buildMenu()` — constructs the full dropdown NSMenu
-  - **Refresh & Timer**: `updateIntervalMenu()`, `restartTimer()`, `adjustDynamicInterval(newPct:)` (core dynamic refresh logic: steps down on usage increase, steps up after 2 unchanged cycles), `updateDynamicStatusItem()`, `toggleDynamicRefresh()`, `setInterval(_:)`, `refresh()`, `updateUI(usage:)`
+  - **Refresh & Timer**: `updateIntervalMenu()`, `restartTimer()` (includes 10% timer tolerance for power efficiency), `adjustDynamicInterval(newPct:)` (core dynamic refresh logic: steps down on usage increase, steps up after 2 unchanged cycles), `updateDynamicStatusItem()`, `toggleDynamicRefresh()`, `setInterval(_:)`, `refresh()`, `updateUI(usage:)`
   - **Display**: `setMenuBarText(_:color:)` (11pt monospaced-digit font; adds a 1px rounded outline box around the menu bar text using the button's CALayer, with 50% opacity border color matching the usage color and 4pt corner radius), `tabbedMenuItemString(left:right:)` (creates `NSAttributedString` with left-aligned tab stop for column-aligned reset times in dropdown), `generateMenuBarText(pct:resetString:prefix:suffix:)` (shared by `updateMenuBarText()` and `testPercentage()`), `updateMenuBarText()`, `showError(_:)`, `updateRelativeTime()`
   - **Alerts**: `sendResetNotification(category:)` fires a macOS notification when a usage category resets to 0%; `toggleResetNotifications()` toggles the "Notifications > Reset to 0%" menu item
   - **User Actions**: `toggleShowModel()`, `openDashboard()`, `copyUsage()`, `toggleLaunchAtLogin()`, `testPercentage(_:)`, `clearTestDisplay()`, `quit()`
@@ -54,7 +54,7 @@ Key design decisions:
 - Credentials come from Claude Code's Keychain entry ("Claude Code-credentials"), so Claude Code must be installed and logged in
 - Refresh interval is user-configurable (1/5/15/30/60 min, default 30 min) and persisted via UserDefaults
 - Menu bar shows percentage + inline countdown with adaptive detail: <30% percentage only, 30–60% adds hours, 61%+ shows full h:m countdown
-- A `displayTimer` (60s) updates the countdown text and relative time between API refreshes
+- A `displayTimer` (60s, 10s tolerance) updates the countdown text and relative time between API refreshes
 - Stale data indicator: appends "(stale)" to menu bar text when last successful fetch was > 2x refresh interval ago
 - Usage rate tracking: snapshots stored in UserDefaults, pruned to 6h / 100 entries, cleared on reset cycle change
 - Reset notifications: macOS notifications when any category drops from >0% to 0%, toggled via "Notifications > Reset to 0%" submenu (default on)
@@ -63,7 +63,9 @@ Key design decisions:
 - Launch at Login via SMAppService (macOS 13+)
 - Menu bar uses 11pt monospaced-digit system font for compact, aligned display, wrapped in a subtle 1px rounded outline box (50% opacity, 4pt corner radius) for visual distinction
 - `refresh()` uses `Task {}` with async/await; UI updates run on `MainActor`
-- `applicationWillTerminate` invalidates both timers
+- `applicationWillTerminate` invalidates both timers and removes notification observers
+- Sleep/wake awareness: observes `willSleepNotification`, `didWakeNotification`, `screensDidSleepNotification`, and `screensDidWakeNotification` to fully stop all timers during system sleep and display sleep, ensuring zero CPU/network activity when the user is away; on wake, timers restart and an immediate refresh fetches fresh data
+- Timer tolerance: both timers set a `tolerance` (10s for display, 10% of interval for API refresh, minimum 10s) so macOS can coalesce wake-ups with other system activity, reducing battery impact
 - Build script applies ad-hoc code signing (`codesign --sign -`)
 - Dynamic refresh: adaptive polling that speeds up when usage is increasing and slows down when idle. Uses a tier ladder [1m, 2m, 5m, 15m], with faster tiers strictly below the user's base interval. At idle, falls back to the user's chosen refresh interval. Steps down on usage increase, steps up after 2 unchanged cycles. Toggle via "Dynamic refresh" in Refresh Interval submenu, persisted via UserDefaults. Resets on new reset cycle. Stale data indicator still uses user's base `refreshInterval`. `dynamicStatusIcon` tracks current state: `↑` (usage increasing, polling faster) and `↓` (polling slowing back down) always display in the menu bar; `↻` (idle at base rate) only displays when `showDynamicIcon` is enabled (default off).
 
