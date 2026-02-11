@@ -157,7 +157,7 @@ xcode-select --install
 
 ## Acknowledgements
 
-Built on the original work by [cfranci](https://github.com/cfranci) ([claude-usage-tracker](https://github.com/cfranci/claude-usage-tracker)).
+Built on the original work by [cfranci](https://github.com/cfranci) ([claude-usage-swift](https://github.com/cfranci/claude-usage-swift)).
 
 ## License
 
