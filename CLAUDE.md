@@ -43,7 +43,7 @@ Everything lives in `ClaudeUsage.swift` (~1000 lines), organized as:
   - **Menu Construction**: `buildMenu()` — constructs the full dropdown NSMenu
   - **Refresh & Timer**: `updateIntervalMenu()`, `restartTimer()`, `adjustDynamicInterval(newPct:)` (core dynamic refresh logic: steps down on usage increase, steps up after 2 unchanged cycles), `updateDynamicStatusItem()`, `toggleDynamicRefresh()`, `setInterval(_:)`, `refresh()`, `updateUI(usage:)`
   - **Display**: `setMenuBarText(_:color:)` (11pt monospaced-digit font), `tabbedMenuItemString(left:right:)` (creates `NSAttributedString` with left-aligned tab stop for column-aligned reset times in dropdown), `generateMenuBarText(pct:resetString:prefix:suffix:)` (shared by `updateMenuBarText()` and `testPercentage()`), `updateMenuBarText()`, `showError(_:)`, `updateRelativeTime()`
-  - **Alerts**: `checkThresholds(pct:)` / `sendThresholdNotification(pct:threshold:)` — fires UNNotification at 80% and 90% usage, once per reset cycle; `toggleAlerts()`
+  - **Alerts**: currently disabled (TODO at top of file to revisit with predictive/rate-based alerts)
   - **User Actions**: `toggleShowModel()`, `openDashboard()`, `copyUsage()`, `toggleLaunchAtLogin()`, `testPercentage(_:)`, `clearTestDisplay()`, `quit()`
   - `effectiveInterval` — computed property returning `refreshInterval` when dynamic is off, or the current tier interval when on
   - `effectiveDynamicLadder` — filters `dynamicRefreshLadder` to tiers strictly less than `refreshInterval`; at idle the timer uses the user's base interval
@@ -57,7 +57,7 @@ Key design decisions:
 - A `displayTimer` (60s) updates the countdown text and relative time between API refreshes
 - Stale data indicator: appends "(stale)" to menu bar text when last successful fetch was > 2x refresh interval ago
 - Usage rate tracking: snapshots stored in UserDefaults, pruned to 6h / 100 entries, cleared on reset cycle change
-- Threshold alerts via UserNotifications at 80% and 90%, toggled via "Usage Alerts" menu item (default: off)
+- Threshold alerts: currently disabled (TODO to revisit with predictive/rate-based alerts)
 - Test Display submenu lets you preview color thresholds at 10/40/75/85/95%
 - "Display model name" toggle prepends active model to menu bar text (e.g. `opus: 45%`), persisted via UserDefaults
 - Launch at Login via SMAppService (macOS 13+)

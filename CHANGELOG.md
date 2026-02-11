@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here.
 
+## [v2.2.7] - 2026-02-11
+
+### Removed
+- Disable usage alerts (macOS notifications) and hide menu item — left TODO to revisit when alerts can provide more value (e.g. predictive alerts, rate-based warnings)
+- Drop UserNotifications framework link from build
+
 ## [v2.2.6] - 2026-02-11
 
 ### Changed

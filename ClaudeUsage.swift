@@ -1,10 +1,11 @@
 import Cocoa
 import ServiceManagement
-import UserNotifications
+// TODO: Revisit UserNotifications usage alerts when they can provide more value (e.g. predictive alerts, rate-based warnings)
+// import UserNotifications
 
 // MARK: - Version
 
-private let appVersion = "2.2.6"
+private let appVersion = "2.2.7"
 
 // MARK: - Usage API
 
@@ -42,8 +43,7 @@ struct DisplayThresholds {
     static let showHoursOnly    = 30  // at/above: show hours-only countdown
     static let showFullCountdown = 61  // at/above: show full h:m countdown
 
-    // Notification alert thresholds (fires once per reset cycle)
-    static let alertThresholds: [Int] = [80, 90]
+    // Notification alert thresholds — currently disabled (see TODO at top of file)
 }
 
 // MARK: - Usage Snapshot
@@ -379,13 +379,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         set { UserDefaults.standard.set(newValue, forKey: "showModelInMenuBar") }
     }
 
-    // Usage Alerts
-    var alertsItem: NSMenuItem!
-    var notificationsEnabled: Bool {
-        get { UserDefaults.standard.object(forKey: "notificationsEnabled") as? Bool ?? false }
-        set { UserDefaults.standard.set(newValue, forKey: "notificationsEnabled") }
-    }
-    var alertedThresholds: Set<Int> = []  // Tracks which thresholds fired this reset cycle
+    // Usage Alerts — currently disabled (see TODO at top of file)
 
     // Stale data tracking
     var lastSuccessfulFetch: Date?
@@ -459,9 +453,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Update checkmarks
         updateIntervalMenu()
         updateDynamicStatusItem()
-
-        // Request notification authorization
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
 
         // Initial fetch
         refresh()
@@ -552,12 +543,6 @@ extension AppDelegate {
         let settingsItem = NSMenuItem(title: "Refresh Interval", action: nil, keyEquivalent: "")
         settingsItem.submenu = settingsMenu
         menu.addItem(settingsItem)
-
-        // Usage Alerts toggle
-        alertsItem = NSMenuItem(title: "Usage Alerts", action: #selector(toggleAlerts), keyEquivalent: "")
-        alertsItem.target = self
-        alertsItem.state = notificationsEnabled ? .on : .off
-        menu.addItem(alertsItem)
 
         // Show Model toggle
         showModelItem = NSMenuItem(title: "Display model name", action: #selector(toggleShowModel), keyEquivalent: "")
@@ -741,7 +726,6 @@ extension AppDelegate {
             let storedResetAt = UserDefaults.standard.string(forKey: "lastResetAt")
             if let resetAt = h.resets_at, resetAt != storedResetAt {
                 UserDefaults.standard.set(resetAt, forKey: "lastResetAt")
-                alertedThresholds.removeAll()
                 UserDefaults.standard.removeObject(forKey: "usageHistory")
                 // Reset dynamic refresh state on new cycle
                 dynamicPreviousPct = nil
@@ -760,9 +744,6 @@ extension AppDelegate {
             } else {
                 rateItem.isHidden = true
             }
-
-            // Check thresholds
-            checkThresholds(pct: pct)
 
             // Adjust dynamic refresh interval
             adjustDynamicInterval(newPct: pct)
@@ -915,35 +896,7 @@ extension AppDelegate {
     }
 }
 
-// MARK: - Alerts
-
-extension AppDelegate {
-    func checkThresholds(pct: Int) {
-        guard notificationsEnabled else { return }
-
-        for threshold in DisplayThresholds.alertThresholds {
-            if pct >= threshold && !alertedThresholds.contains(threshold) {
-                alertedThresholds.insert(threshold)
-                sendThresholdNotification(pct: pct, threshold: threshold)
-            }
-        }
-    }
-
-    func sendThresholdNotification(pct: Int, threshold: Int) {
-        let content = UNMutableNotificationContent()
-        content.title = "Claude Usage Alert"
-        content.body = "Usage has reached \(pct)% (threshold: \(threshold)%)"
-        content.sound = .default
-
-        let request = UNNotificationRequest(identifier: "threshold-\(threshold)", content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
-    }
-
-    @objc func toggleAlerts() {
-        notificationsEnabled.toggle()
-        alertsItem.state = notificationsEnabled ? .on : .off
-    }
-}
+// MARK: - Alerts (disabled — see TODO at top of file)
 
 // MARK: - User Actions
 
