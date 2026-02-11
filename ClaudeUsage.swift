@@ -4,7 +4,7 @@ import UserNotifications
 
 // MARK: - Version
 
-private let appVersion = "2.3.1"
+private let appVersion = "2.3.2"
 
 // MARK: - Usage API
 
@@ -836,6 +836,14 @@ extension AppDelegate {
             button.attributedTitle = NSAttributedString(string: text, attributes: [
                 .font: font
             ])
+        }
+        // Add outline box around the menu bar text
+        button.wantsLayer = true
+        if let layer = button.layer {
+            let borderColor = color ?? NSColor.labelColor
+            layer.borderColor = borderColor.withAlphaComponent(0.5).cgColor
+            layer.borderWidth = 1.0
+            layer.cornerRadius = 4.0
         }
     }
 

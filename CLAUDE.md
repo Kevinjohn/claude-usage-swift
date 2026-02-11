@@ -42,7 +42,7 @@ Everything lives in `ClaudeUsage.swift` (~1000 lines), organized as:
 - **AppDelegate extensions** (5 logical groups, each with `// MARK: -` for Xcode jump-bar navigation):
   - **Menu Construction**: `buildMenu()` — constructs the full dropdown NSMenu
   - **Refresh & Timer**: `updateIntervalMenu()`, `restartTimer()`, `adjustDynamicInterval(newPct:)` (core dynamic refresh logic: steps down on usage increase, steps up after 2 unchanged cycles), `updateDynamicStatusItem()`, `toggleDynamicRefresh()`, `setInterval(_:)`, `refresh()`, `updateUI(usage:)`
-  - **Display**: `setMenuBarText(_:color:)` (11pt monospaced-digit font), `tabbedMenuItemString(left:right:)` (creates `NSAttributedString` with left-aligned tab stop for column-aligned reset times in dropdown), `generateMenuBarText(pct:resetString:prefix:suffix:)` (shared by `updateMenuBarText()` and `testPercentage()`), `updateMenuBarText()`, `showError(_:)`, `updateRelativeTime()`
+  - **Display**: `setMenuBarText(_:color:)` (11pt monospaced-digit font; adds a 1px rounded outline box around the menu bar text using the button's CALayer, with 50% opacity border color matching the usage color and 4pt corner radius), `tabbedMenuItemString(left:right:)` (creates `NSAttributedString` with left-aligned tab stop for column-aligned reset times in dropdown), `generateMenuBarText(pct:resetString:prefix:suffix:)` (shared by `updateMenuBarText()` and `testPercentage()`), `updateMenuBarText()`, `showError(_:)`, `updateRelativeTime()`
   - **Alerts**: `sendResetNotification(category:)` fires a macOS notification when a usage category resets to 0%; `toggleResetNotifications()` toggles the "Notifications > Reset to 0%" menu item
   - **User Actions**: `toggleShowModel()`, `openDashboard()`, `copyUsage()`, `toggleLaunchAtLogin()`, `testPercentage(_:)`, `clearTestDisplay()`, `quit()`
   - `effectiveInterval` — computed property returning `refreshInterval` when dynamic is off, or the current tier interval when on
@@ -61,7 +61,7 @@ Key design decisions:
 - Test Display submenu lets you preview color thresholds at 10/40/75/85/95%
 - "Display model name" toggle prepends active model to menu bar text (e.g. `opus: 45%`), persisted via UserDefaults
 - Launch at Login via SMAppService (macOS 13+)
-- Menu bar uses 11pt monospaced-digit system font for compact, aligned display
+- Menu bar uses 11pt monospaced-digit system font for compact, aligned display, wrapped in a subtle 1px rounded outline box (50% opacity, 4pt corner radius) for visual distinction
 - `refresh()` uses `Task {}` with async/await; UI updates run on `MainActor`
 - `applicationWillTerminate` invalidates both timers
 - Build script applies ad-hoc code signing (`codesign --sign -`)
