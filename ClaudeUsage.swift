@@ -149,7 +149,7 @@ func fetchUsage(token: String) async throws -> UsageResponse {
     var request = URLRequest(url: url)
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-    request.setValue("ClaudeUsage-menubar/2.1.2", forHTTPHeaderField: "User-Agent")
+    request.setValue("ClaudeUsage-menubar/2.2.0", forHTTPHeaderField: "User-Agent")
 
     let (data, response): (Data, URLResponse)
     do {
@@ -313,6 +313,10 @@ func shortModelName(_ modelId: String) -> String {
     return String(modelId.prefix(12))
 }
 
+// MARK: - Dynamic Refresh Ladder
+
+let dynamicRefreshLadder: [TimeInterval] = [60, 120, 300, 900]  // 1m, 2m, 5m, 15m
+
 // MARK: - App Delegate
 
 class AppDelegate: NSObject, NSApplicationDelegate {
@@ -361,6 +365,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Stale data tracking
     var lastSuccessfulFetch: Date?
     var lastUpdateTime: Date?
+
+    // Dynamic refresh
+    var dynamicRefreshItem: NSMenuItem!
+    var dynamicStatusItem: NSMenuItem!
+    var dynamicTierIndex: Int = 0
+    var dynamicPreviousPct: Int? = nil
+    var dynamicUnchangedCount: Int = 0
+    var dynamicStatusIcon: String = "↻"  // ↑ usage increasing, ↓ polling slowing down, ↻ idle at base rate
+
+    var dynamicRefreshEnabled: Bool {
+        get { UserDefaults.standard.object(forKey: "dynamicRefreshEnabled") as? Bool ?? false }
+        set { UserDefaults.standard.set(newValue, forKey: "dynamicRefreshEnabled") }
+    }
+
+    var effectiveDynamicLadder: [TimeInterval] {
+        let ceiling = min(refreshInterval, 900)
+        return dynamicRefreshLadder.filter { $0 <= ceiling }
+    }
+
+    var effectiveInterval: TimeInterval {
+        guard dynamicRefreshEnabled else { return refreshInterval }
+        let ladder = effectiveDynamicLadder
+        guard !ladder.isEmpty else { return refreshInterval }
+        let clampedIndex = min(dynamicTierIndex, ladder.count - 1)
+        return ladder[clampedIndex]
+    }
 
     // Current interval in seconds
     var refreshInterval: TimeInterval = 900 {
@@ -431,6 +461,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             settingsMenu.addItem(item)
         }
 
+        settingsMenu.addItem(NSMenuItem.separator())
+        dynamicRefreshItem = NSMenuItem(title: "Dynamic refresh", action: #selector(toggleDynamicRefresh), keyEquivalent: "")
+        dynamicRefreshItem.target = self
+        dynamicRefreshItem.state = dynamicRefreshEnabled ? .on : .off
+        settingsMenu.addItem(dynamicRefreshItem)
+
+        dynamicStatusItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        dynamicStatusItem.isEnabled = false
+        dynamicStatusItem.isHidden = !dynamicRefreshEnabled
+        settingsMenu.addItem(dynamicStatusItem)
+
         let settingsItem = NSMenuItem(title: "Refresh Interval", action: nil, keyEquivalent: "")
         settingsItem.submenu = settingsMenu
         menu.addItem(settingsItem)
@@ -490,8 +531,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let stored = UserDefaults.standard.double(forKey: "refreshInterval")
         if stored > 0 { refreshInterval = stored }
 
+        // Initialize dynamic refresh state
+        if dynamicRefreshEnabled {
+            let ladder = effectiveDynamicLadder
+            dynamicTierIndex = ladder.isEmpty ? 0 : ladder.count - 1
+            dynamicPreviousPct = nil
+            dynamicUnchangedCount = 0
+            dynamicStatusIcon = "↻"
+        }
+
         // Update checkmarks
         updateIntervalMenu()
+        updateDynamicStatusItem()
 
         // Request notification authorization
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
@@ -522,9 +573,80 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func restartTimer() {
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
+        timer = Timer.scheduledTimer(withTimeInterval: effectiveInterval, repeats: true) { [weak self] _ in
             self?.refresh()
         }
+    }
+
+    func adjustDynamicInterval(newPct: Int) {
+        guard dynamicRefreshEnabled else { return }
+        let ladder = effectiveDynamicLadder
+        guard !ladder.isEmpty else { return }
+
+        if let prevPct = dynamicPreviousPct {
+            if newPct > prevPct {
+                // Usage increasing — step down (faster)
+                dynamicTierIndex = max(dynamicTierIndex - 1, 0)
+                dynamicUnchangedCount = 0
+                dynamicStatusIcon = "↑"
+            } else if newPct == prevPct {
+                // Unchanged — step up (slower) after 2 consecutive cycles
+                dynamicUnchangedCount += 1
+                if dynamicUnchangedCount >= 2 {
+                    dynamicTierIndex = min(dynamicTierIndex + 1, ladder.count - 1)
+                    dynamicUnchangedCount = 0
+                }
+                // ↓ if still cooling down from a faster tier, ↻ if back at base rate
+                if dynamicTierIndex >= ladder.count - 1 {
+                    dynamicStatusIcon = "↻"
+                } else {
+                    dynamicStatusIcon = "↓"
+                }
+            } else {
+                // Usage decreased (reset cycle) — reset to idle
+                dynamicUnchangedCount = 0
+                dynamicStatusIcon = "↻"
+            }
+            updateMenuBarText()
+        }
+
+        dynamicPreviousPct = newPct
+        restartTimer()
+        updateDynamicStatusItem()
+    }
+
+    func updateDynamicStatusItem() {
+        guard dynamicRefreshEnabled else {
+            dynamicStatusItem.isHidden = true
+            return
+        }
+        let seconds = Int(effectiveInterval)
+        let label = seconds >= 60 ? "\(seconds / 60)m" : "\(seconds)s"
+        let arrow = (dynamicStatusIcon == "↑" || dynamicStatusIcon == "↓") ? " \(dynamicStatusIcon)" : ""
+        dynamicStatusItem.title = "Current: \(label)\(arrow)"
+        dynamicStatusItem.isHidden = false
+    }
+
+    @objc func toggleDynamicRefresh() {
+        dynamicRefreshEnabled.toggle()
+        dynamicRefreshItem.state = dynamicRefreshEnabled ? .on : .off
+
+        if dynamicRefreshEnabled {
+            let ladder = effectiveDynamicLadder
+            dynamicTierIndex = ladder.count - 1  // Start at slowest
+            dynamicPreviousPct = fiveHourPct
+            dynamicUnchangedCount = 0
+            dynamicStatusIcon = "↻"
+        } else {
+            dynamicPreviousPct = nil
+            dynamicUnchangedCount = 0
+            dynamicTierIndex = 0
+            dynamicStatusIcon = "↻"
+        }
+
+        restartTimer()
+        updateDynamicStatusItem()
+        updateMenuBarText()
     }
 
     @objc func setInterval(_ sender: NSMenuItem) {
@@ -575,21 +697,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func generateMenuBarText(pct: Int, resetString: String?, prefix: String = "") -> (text: String, color: NSColor) {
+    func generateMenuBarText(pct: Int, resetString: String?, prefix: String = "", suffix: String = "") -> (text: String, color: NSColor) {
         let color = colorForPercentage(pct)
 
         if pct < DisplayThresholds.showHoursOnly {
-            return ("\(prefix)\(pct)%", color)
+            return ("\(prefix)\(pct)%\(suffix)", color)
         } else if let resetStr = resetString {
             if pct < DisplayThresholds.showFullCountdown {
                 let countdown = formatResetHoursOnly(resetStr)
-                return ("\(prefix)\(pct)% / \(countdown)", color)
+                return ("\(prefix)\(pct)% / \(countdown)\(suffix)", color)
             } else {
                 let countdown = formatReset(resetStr)
-                return ("\(prefix)\(pct)% / \(countdown)", color)
+                return ("\(prefix)\(pct)% / \(countdown)\(suffix)", color)
             }
         } else {
-            return ("\(prefix)\(pct)%", color)
+            return ("\(prefix)\(pct)%\(suffix)", color)
         }
     }
 
@@ -600,7 +722,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         guard let pct = fiveHourPct else { return }
         let prefix = (showModelInMenuBar ? activeModelName.map { "\($0): " } : nil) ?? ""
-        var (text, color) = generateMenuBarText(pct: pct, resetString: fiveHourResetString, prefix: prefix)
+        let suffix = dynamicRefreshEnabled ? " \(dynamicStatusIcon)" : ""
+        var (text, color) = generateMenuBarText(pct: pct, resetString: fiveHourResetString, prefix: prefix, suffix: suffix)
 
         // Stale data indicator
         if let lastFetch = lastSuccessfulFetch, Date().timeIntervalSince(lastFetch) > refreshInterval * 2 {
@@ -648,6 +771,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 UserDefaults.standard.set(resetAt, forKey: "lastResetAt")
                 alertedThresholds.removeAll()
                 UserDefaults.standard.removeObject(forKey: "usageHistory")
+                // Reset dynamic refresh state on new cycle
+                dynamicPreviousPct = nil
+                dynamicUnchangedCount = 0
+                dynamicStatusIcon = "↻"
+                let ladder = effectiveDynamicLadder
+                if !ladder.isEmpty { dynamicTierIndex = ladder.count - 1 }
+                updateDynamicStatusItem()
             }
 
             // Save snapshot and update rate
@@ -661,6 +791,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             // Check thresholds
             checkThresholds(pct: pct)
+
+            // Adjust dynamic refresh interval
+            adjustDynamicInterval(newPct: pct)
         } else {
             fiveHourPct = nil
             fiveHourResetString = nil
