@@ -4,7 +4,7 @@ import UserNotifications
 
 // MARK: - Version
 
-private let appVersion = "2.2.4"
+private let appVersion = "2.2.5"
 
 // MARK: - Usage API
 
@@ -802,9 +802,13 @@ extension AppDelegate {
         // Extra (API returns cents, display as dollars)
         if let e = usage.extra_usage, e.is_enabled,
            let used = e.used_credits, let limit = e.monthly_limit, let util = e.utilization {
-            extraItem.title = String(format: "Extra: $%.2f/$%.0f (%.0f%%)", used / 100, limit / 100, util)
+            let leftExtra = String(format: "Extra: $%.2f/$%.0f", used / 100, limit / 100)
+            let rightExtra = String(format: "(%.0f%%)", util)
+            extraItem.title = "\(leftExtra) \(rightExtra)"
+            extraItem.attributedTitle = tabbedMenuItemString(left: leftExtra, right: rightExtra)
         } else {
             extraItem.title = "Extra: --"
+            extraItem.attributedTitle = nil
         }
 
         // Updated time
@@ -895,6 +899,7 @@ extension AppDelegate {
         sonnetItem.title = "Sonnet: --"
         sonnetItem.attributedTitle = nil
         extraItem.title = "Extra: --"
+        extraItem.attributedTitle = nil
         rateItem.isHidden = true
 
         lastUpdateTime = Date()

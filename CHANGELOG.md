@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here.
 
+## [v2.2.5] - 2026-02-11
+
+### Improved
+- Extend column-aligned tab layout to Extra usage row — utilization percentage aligns with reset times above
+
 ## [v2.2.4] - 2026-02-11
 
 ### Improved
