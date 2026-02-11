@@ -37,6 +37,7 @@ A native macOS menu bar app that shows your Claude API usage, reset countdowns, 
 
 **Preferences**
 - Refresh interval: 1, 5, 15, 30, or 60 minutes (default: 15 min)
+- Dynamic refresh — adaptive polling that speeds up when usage is climbing and slows back down when stable, with status icons in the menu bar (`↑` increasing, `↓` cooling down, `↻` idle)
 - Launch at Login (macOS 13+, via SMAppService)
 - Display model name toggle
 
@@ -113,6 +114,18 @@ The menu bar adjusts detail based on how close you are to your limit:
 | 61%+        | Percentage + full time | `78% / 2h 30m`      |
 
 With model display enabled, the model name is prepended: `opus: 45% / 2h 30m`
+
+### Dynamic Refresh Icons
+
+When dynamic refresh is enabled, a trailing icon shows the current polling state:
+
+| Icon | Meaning | Detail |
+|------|---------|--------|
+| `↑`  | Increasing | Usage went up — polling faster |
+| `↓`  | Cooling down | Usage stable, polling slowing back toward base rate |
+| `↻`  | Idle | Back at base refresh interval |
+
+Examples: `47% ↑`, `opus: 72% / 3h 12m ↓`, `45% ↻`
 
 ## Error Indicators
 

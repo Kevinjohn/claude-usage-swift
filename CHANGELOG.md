@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here.
 
+## [v2.2.0] - 2026-02-11
+
+### Added
+- Dynamic refresh — adaptive polling that speeds up when usage is climbing and slows down when stable
+- Menu bar status icons for dynamic refresh state: `↑` (usage increasing, polling faster), `↓` (polling cooling down toward base rate), `↻` (idle at base rate)
+- "Current: Xm" status item in the Refresh Interval submenu showing active polling interval and direction
+- Dynamic refresh toggle in the Refresh Interval submenu, persisted via UserDefaults
+
 ## [v2.1.2] - 2026-02-11
 
 ### Added
@@ -47,6 +55,7 @@ All notable changes to this project are documented here.
 - 5-hour and weekly limit display
 - Keychain-based authentication via Claude Code credentials
 
+[v2.2.0]: https://github.com/Kevinjohn/claude-usage-swift/releases/tag/v2.2.0
 [v2.1.2]: https://github.com/Kevinjohn/claude-usage-swift/releases/tag/v2.1.2
 [v2.1.1]: https://github.com/Kevinjohn/claude-usage-swift/releases/tag/v2.1.1
 [v2.1.0]: https://github.com/Kevinjohn/claude-usage-swift/releases/tag/v2.1.0
