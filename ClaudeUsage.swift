@@ -4,7 +4,7 @@ import UserNotifications
 
 // MARK: - Version
 
-private let appVersion = "2.2.2"
+private let appVersion = "2.2.3"
 
 // MARK: - Usage API
 
@@ -30,7 +30,7 @@ struct ExtraUsage: Codable {
 // MARK: - Display Thresholds
 
 /// Central configuration for all percentage-based thresholds.
-/// Adjust these values to change when colors, countdown detail, and alerts trigger.
+/// Centralised here so color, countdown, and alert boundaries stay consistent.
 struct DisplayThresholds {
     // Color thresholds (menu bar text color changes at these boundaries)
     static let colorGreen  = 30   // below this: grey, at/above: green
@@ -55,6 +55,7 @@ struct UsageSnapshot: Codable {
 
 // MARK: - Ephemeral URLSession
 
+/// Ephemeral to avoid caching OAuth tokens or usage data to disk.
 private let urlSession: URLSession = {
     let config = URLSessionConfiguration.ephemeral
     config.requestCachePolicy = .reloadIgnoringLocalCacheData
@@ -119,6 +120,8 @@ private let dateOnlyFormatter: DateFormatter = {
 
 // MARK: - Shared Date Parser
 
+/// Tries both fractional-seconds and plain ISO8601 — the API returns either format
+/// depending on the endpoint, so we need to handle both.
 func parseISO8601(_ string: String) -> Date? {
     if let date = iso8601FractionalFormatter.date(from: string) { return date }
     return iso8601Formatter.date(from: string)
@@ -126,6 +129,8 @@ func parseISO8601(_ string: String) -> Date? {
 
 // MARK: - Networking (async)
 
+/// Reads Claude Code's OAuth token from the macOS Keychain.
+/// Runs Process on a background queue because Process.run() blocks until exit.
 func getOAuthToken() async throws -> String {
     try await withCheckedThrowingContinuation { continuation in
         DispatchQueue.global(qos: .userInitiated).async {
@@ -267,7 +272,7 @@ func computeRateString() -> String? {
           let first = snapshots.first,
           let last = snapshots.last else { return nil }
     let elapsed = last.timestamp - first.timestamp
-    guard elapsed >= 300 else { return nil } // Need 5+ minutes
+    guard elapsed >= 300 else { return nil } // Need 5+ minutes of data
 
     let pctDelta = last.pct - first.pct
     let hoursElapsed = elapsed / 3600
@@ -290,6 +295,8 @@ func computeRateString() -> String? {
 
 // MARK: - Model Detection
 
+/// Finds the most-used model across all projects in ~/.claude.json
+/// by summing output tokens, so the menu bar shows the relevant model.
 func readActiveModel() -> String? {
     let claudeJson = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude.json")
     guard let data = try? Data(contentsOf: claudeJson),
@@ -378,7 +385,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         get { UserDefaults.standard.object(forKey: "notificationsEnabled") as? Bool ?? false }
         set { UserDefaults.standard.set(newValue, forKey: "notificationsEnabled") }
     }
-    var alertedThresholds: Set<Int> = []
+    var alertedThresholds: Set<Int> = []  // Tracks which thresholds fired this reset cycle
 
     // Stale data tracking
     var lastSuccessfulFetch: Date?
@@ -403,6 +410,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         set { UserDefaults.standard.set(newValue, forKey: "showDynamicIcon") }
     }
 
+    // Only tiers faster than the user's base interval; at idle we fall back to base
     var effectiveDynamicLadder: [TimeInterval] {
         return dynamicRefreshLadder.filter { $0 < refreshInterval }
     }
@@ -461,7 +469,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Start timer
         restartTimer()
 
-        // Update menu bar countdown and relative time every 60s (display only, no API calls)
+        // Separate from refresh timer — updates countdown text without API calls
         displayTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             self?.updateMenuBarText()
             self?.updateRelativeTime()
@@ -472,7 +480,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         timer?.invalidate()
         displayTimer?.invalidate()
     }
+}
 
+// MARK: - Menu Construction
+
+extension AppDelegate {
     private func buildMenu() -> NSMenu {
         let menu = NSMenu()
 
@@ -561,7 +573,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
-        // Test display submenu — derived from DisplayThresholds
+        // Test values derived from DisplayThresholds so they stay in sync
         let testMenu = NSMenu()
         let t = DisplayThresholds.self
         let testRanges: [(label: String, pct: Int)] = [
@@ -591,7 +603,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         return menu
     }
+}
 
+// MARK: - Refresh & Timer
+
+extension AppDelegate {
     func updateIntervalMenu() {
         for item in intervalItems {
             item.state = refreshInterval == TimeInterval(item.tag) ? .on : .off
@@ -709,72 +725,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func setMenuBarText(_ text: String, color: NSColor? = nil) {
-        guard let button = statusItem.button else { return }
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
-        if let color = color {
-            button.attributedTitle = NSAttributedString(string: text, attributes: [
-                .foregroundColor: color,
-                .font: font
-            ])
-        } else {
-            button.attributedTitle = NSAttributedString(string: text, attributes: [
-                .font: font
-            ])
-        }
-    }
-
-    func generateMenuBarText(pct: Int, resetString: String?, prefix: String = "", suffix: String = "") -> (text: String, color: NSColor) {
-        let color = colorForPercentage(pct)
-
-        if pct < DisplayThresholds.showHoursOnly {
-            return ("\(prefix)\(pct)%\(suffix)", color)
-        } else if let resetStr = resetString {
-            if pct < DisplayThresholds.showFullCountdown {
-                let countdown = formatResetHoursOnly(resetStr)
-                return ("\(prefix)\(pct)% / \(countdown)\(suffix)", color)
-            } else {
-                let countdown = formatReset(resetStr)
-                return ("\(prefix)\(pct)% / \(countdown)\(suffix)", color)
-            }
-        } else {
-            return ("\(prefix)\(pct)%\(suffix)", color)
-        }
-    }
-
-    func updateMenuBarText() {
-        if testModeActive {
-            testModeActive = false
-            return
-        }
-        guard let pct = fiveHourPct else { return }
-        let prefix = (showModelInMenuBar ? activeModelName.map { "\($0): " } : nil) ?? ""
-        let showIcon = dynamicRefreshEnabled && (dynamicStatusIcon != "↻" || showDynamicIcon)
-        let suffix = showIcon ? " \(dynamicStatusIcon)" : ""
-        var (text, color) = generateMenuBarText(pct: pct, resetString: fiveHourResetString, prefix: prefix, suffix: suffix)
-
-        // Stale data indicator
-        if let lastFetch = lastSuccessfulFetch, Date().timeIntervalSince(lastFetch) > refreshInterval * 2 {
-            text += " (stale)"
-        }
-
-        setMenuBarText(text, color: color)
-    }
-
-    func showError(_ error: UsageError) {
-        fiveHourPct = nil
-        fiveHourResetString = nil
-        setMenuBarText(error.menuBarText)
-        fiveHourItem.title = "5-hour: \(error.description)"
-        weeklyItem.title = "Weekly: --"
-        sonnetItem.title = "Sonnet: --"
-        extraItem.title = "Extra: --"
-        rateItem.isHidden = true
-
-        lastUpdateTime = Date()
-        updateRelativeTime()
-    }
-
     func updateUI(usage: UsageResponse) {
         // Model
         if let model = activeModelName {
@@ -793,7 +743,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let reset = h.resets_at.map { formatReset($0) } ?? "--"
             fiveHourItem.title = "5-hour: \(pct)% (resets \(reset))"
 
-            // Detect reset cycle change
+            // New reset timestamp means a new usage cycle — clear stale state
             let storedResetAt = UserDefaults.standard.string(forKey: "lastResetAt")
             if let resetAt = h.resets_at, resetAt != storedResetAt {
                 UserDefaults.standard.set(resetAt, forKey: "lastResetAt")
@@ -844,7 +794,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             sonnetItem.title = "Sonnet: --"
         }
 
-        // Extra
+        // Extra (API returns cents, display as dollars)
         if let e = usage.extra_usage, e.is_enabled,
            let used = e.used_credits, let limit = e.monthly_limit, let util = e.utilization {
             extraItem.title = String(format: "Extra: $%.2f/$%.0f (%.0f%%)", used / 100, limit / 100, util)
@@ -854,6 +804,77 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Updated time
         lastSuccessfulFetch = Date()
+        lastUpdateTime = Date()
+        updateRelativeTime()
+    }
+}
+
+// MARK: - Display
+
+extension AppDelegate {
+    func setMenuBarText(_ text: String, color: NSColor? = nil) {
+        guard let button = statusItem.button else { return }
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        if let color = color {
+            button.attributedTitle = NSAttributedString(string: text, attributes: [
+                .foregroundColor: color,
+                .font: font
+            ])
+        } else {
+            button.attributedTitle = NSAttributedString(string: text, attributes: [
+                .font: font
+            ])
+        }
+    }
+
+    func generateMenuBarText(pct: Int, resetString: String?, prefix: String = "", suffix: String = "") -> (text: String, color: NSColor) {
+        let color = colorForPercentage(pct)
+
+        if pct < DisplayThresholds.showHoursOnly {
+            return ("\(prefix)\(pct)%\(suffix)", color)
+        } else if let resetStr = resetString {
+            if pct < DisplayThresholds.showFullCountdown {
+                let countdown = formatResetHoursOnly(resetStr)
+                return ("\(prefix)\(pct)% / \(countdown)\(suffix)", color)
+            } else {
+                let countdown = formatReset(resetStr)
+                return ("\(prefix)\(pct)% / \(countdown)\(suffix)", color)
+            }
+        } else {
+            return ("\(prefix)\(pct)%\(suffix)", color)
+        }
+    }
+
+    func updateMenuBarText() {
+        // One-shot guard: skip one refresh cycle after test display so it stays visible
+        if testModeActive {
+            testModeActive = false
+            return
+        }
+        guard let pct = fiveHourPct else { return }
+        let prefix = (showModelInMenuBar ? activeModelName.map { "\($0): " } : nil) ?? ""
+        let showIcon = dynamicRefreshEnabled && (dynamicStatusIcon != "↻" || showDynamicIcon)
+        let suffix = showIcon ? " \(dynamicStatusIcon)" : ""
+        var (text, color) = generateMenuBarText(pct: pct, resetString: fiveHourResetString, prefix: prefix, suffix: suffix)
+
+        // Stale data indicator
+        if let lastFetch = lastSuccessfulFetch, Date().timeIntervalSince(lastFetch) > refreshInterval * 2 {
+            text += " (stale)"
+        }
+
+        setMenuBarText(text, color: color)
+    }
+
+    func showError(_ error: UsageError) {
+        fiveHourPct = nil
+        fiveHourResetString = nil
+        setMenuBarText(error.menuBarText)
+        fiveHourItem.title = "5-hour: \(error.description)"
+        weeklyItem.title = "Weekly: --"
+        sonnetItem.title = "Sonnet: --"
+        extraItem.title = "Extra: --"
+        rateItem.isHidden = true
+
         lastUpdateTime = Date()
         updateRelativeTime()
     }
@@ -872,9 +893,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             updatedItem.title = "Updated \(h)h \(m)m ago"
         }
     }
+}
 
-    // MARK: - Threshold Alerts
+// MARK: - Alerts
 
+extension AppDelegate {
     func checkThresholds(pct: Int) {
         guard notificationsEnabled else { return }
 
@@ -900,7 +923,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         notificationsEnabled.toggle()
         alertsItem.state = notificationsEnabled ? .on : .off
     }
+}
 
+// MARK: - User Actions
+
+extension AppDelegate {
     @objc func toggleShowModel() {
         showModelInMenuBar.toggle()
         showModelItem.state = showModelInMenuBar ? .on : .off

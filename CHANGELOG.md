@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here.
 
+## [v2.2.3] - 2026-02-11
+
+### Improved
+- Organize AppDelegate into 5 focused extensions (Menu Construction, Refresh & Timer, Display, Alerts, User Actions) for easier navigation
+- Add "why" comments throughout — explain non-obvious design decisions (ephemeral session, dual ISO8601 parsers, background Process queue, one-shot test guard, cents-to-dollars conversion)
+- Improve existing comments to explain intent rather than restating code
+
 ## [v2.2.2] - 2026-02-11
 
 ### Improved
@@ -75,6 +82,7 @@ All notable changes to this project are documented here.
 - 5-hour and weekly limit display
 - Keychain-based authentication via Claude Code credentials
 
+[v2.2.3]: https://github.com/Kevinjohn/claude-usage-swift/releases/tag/v2.2.3
 [v2.2.2]: https://github.com/Kevinjohn/claude-usage-swift/releases/tag/v2.2.2
 [v2.2.1]: https://github.com/Kevinjohn/claude-usage-swift/releases/tag/v2.2.1
 [v2.2.0]: https://github.com/Kevinjohn/claude-usage-swift/releases/tag/v2.2.0

@@ -23,7 +23,7 @@ Requires macOS 12.0+, Swift 5.9+, and Xcode Command Line Tools.
 
 ## Architecture
 
-Everything lives in `ClaudeUsage.swift` (~960 lines), organized as:
+Everything lives in `ClaudeUsage.swift` (~1000 lines), organized as:
 
 - **Version constant**: `appVersion` — single source of truth for version string, extracted by `build.sh` into Info.plist
 - **Data models** (top): `UsageResponse`, `UsageLimit`, `ExtraUsage` — Codable structs matching the Anthropic OAuth usage API response; `UsageSnapshot` for tracking usage history
@@ -38,19 +38,13 @@ Everything lives in `ClaudeUsage.swift` (~960 lines), organized as:
 - **Snapshot helpers**: `loadSnapshots()`, `saveSnapshot(pct:)`, `computeRateString()` — track usage over time, compute %/hr rate and estimated time to limit
 - **Model detection**: `readActiveModel()` reads `~/.claude.json` to find the most-used model across projects; `shortModelName()` converts full model IDs (e.g. `claude-opus-4-6`) to short lowercase names (`opus`, `sonnet`, `haiku`)
 - **Dynamic refresh ladder**: module-level `dynamicRefreshLadder` constant `[60, 120, 300, 900]` — tiers for adaptive polling
-- **AppDelegate**: NSApplicationDelegate managing the NSStatusItem (menu bar), dropdown NSMenu, refresh timer, display timer (60s countdown updates), test display mode, launch-at-login toggle, usage alerts, rate display, model display, stale data indicator, dynamic refresh, and `showError()` for structured error display
-  - `buildMenu()` — constructs the full dropdown NSMenu (extracted from `applicationDidFinishLaunching` for readability)
-  - `setMenuBarText(_:color:)` — sets menu bar text with 11pt monospaced-digit font and optional color
-  - `generateMenuBarText(pct:resetString:prefix:suffix:)` — shared method for menu bar text generation used by both `updateMenuBarText()` and `testPercentage()`; `suffix` appends dynamic status icon when enabled
-  - Interval items built via loop with `item.tag = seconds` and single `setInterval(_:)` handler
-  - `updateRelativeTime()` — shows "Updated just now" / "Xm ago" / "Xh Ym ago"
-  - `checkThresholds(pct:)` / `sendThresholdNotification(pct:threshold:)` — fires UNNotification at 80% and 90% usage, once per reset cycle
-  - `toggleShowModel()` — toggles model name prefix in menu bar, persisted via `showModelInMenuBar` UserDefault
-  - `openDashboard()` — opens Anthropic console in default browser
-  - `copyUsage()` — copies all usage stats to clipboard
-  - `adjustDynamicInterval(newPct:)` — core dynamic refresh logic: steps down (faster) when usage increases, steps up (slower) after 2 unchanged cycles; updates `dynamicStatusIcon` (`↑`/`↓`/`↻`) and `dynamicStatusItem`
-  - `updateDynamicStatusItem()` — updates the "Current: Xm" menu item in the Refresh Interval submenu; shows arrow icon for `↑`/`↓` states, hidden when dynamic refresh is off
-  - `toggleDynamicRefresh()` — toggles dynamic refresh mode, persisted via `dynamicRefreshEnabled` UserDefault
+- **AppDelegate** (main class): all stored/computed properties, `applicationDidFinishLaunching`, `applicationWillTerminate`
+- **AppDelegate extensions** (5 logical groups, each with `// MARK: -` for Xcode jump-bar navigation):
+  - **Menu Construction**: `buildMenu()` — constructs the full dropdown NSMenu
+  - **Refresh & Timer**: `updateIntervalMenu()`, `restartTimer()`, `adjustDynamicInterval(newPct:)` (core dynamic refresh logic: steps down on usage increase, steps up after 2 unchanged cycles), `updateDynamicStatusItem()`, `toggleDynamicRefresh()`, `setInterval(_:)`, `refresh()`, `updateUI(usage:)`
+  - **Display**: `setMenuBarText(_:color:)` (11pt monospaced-digit font), `generateMenuBarText(pct:resetString:prefix:suffix:)` (shared by `updateMenuBarText()` and `testPercentage()`), `updateMenuBarText()`, `showError(_:)`, `updateRelativeTime()`
+  - **Alerts**: `checkThresholds(pct:)` / `sendThresholdNotification(pct:threshold:)` — fires UNNotification at 80% and 90% usage, once per reset cycle; `toggleAlerts()`
+  - **User Actions**: `toggleShowModel()`, `openDashboard()`, `copyUsage()`, `toggleLaunchAtLogin()`, `testPercentage(_:)`, `clearTestDisplay()`, `quit()`
   - `effectiveInterval` — computed property returning `refreshInterval` when dynamic is off, or the current tier interval when on
   - `effectiveDynamicLadder` — filters `dynamicRefreshLadder` to tiers strictly less than `refreshInterval`; at idle the timer uses the user's base interval
   - `showDynamicIcon` — UserDefaults-backed toggle (default off) controlling whether the idle `↻` icon appears in the menu bar; `↑`/`↓` arrows always display regardless
