@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented here.
 
+## [v2.2.1] - 2026-02-11
+
+### Changed
+- Default refresh interval changed from 15 minutes to 30 minutes
+- Dynamic refresh now relaxes back to the user's chosen base interval instead of capping at 15 minutes
+- Dynamic refresh idle icon (`↻`) hidden by default; `↑` and `↓` arrows still display when active
+
+### Added
+- `showDynamicIcon` preference (default off, no menu toggle yet) to control idle icon visibility
+
 ## [v2.2.0] - 2026-02-11
 
 ### Added
@@ -55,6 +65,7 @@ All notable changes to this project are documented here.
 - 5-hour and weekly limit display
 - Keychain-based authentication via Claude Code credentials
 
+[v2.2.1]: https://github.com/Kevinjohn/claude-usage-swift/releases/tag/v2.2.1
 [v2.2.0]: https://github.com/Kevinjohn/claude-usage-swift/releases/tag/v2.2.0
 [v2.1.2]: https://github.com/Kevinjohn/claude-usage-swift/releases/tag/v2.1.2
 [v2.1.1]: https://github.com/Kevinjohn/claude-usage-swift/releases/tag/v2.1.1

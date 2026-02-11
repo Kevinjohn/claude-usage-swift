@@ -36,8 +36,8 @@ A native macOS menu bar app that shows your Claude API usage, reset countdowns, 
 - Toggle on/off from the dropdown menu
 
 **Preferences**
-- Refresh interval: 1, 5, 15, 30, or 60 minutes (default: 15 min)
-- Dynamic refresh — adaptive polling that speeds up when usage is climbing and slows back down when stable, with status icons in the menu bar (`↑` increasing, `↓` cooling down, `↻` idle)
+- Refresh interval: 1, 5, 15, 30, or 60 minutes (default: 30 min)
+- Dynamic refresh — adaptive polling that speeds up when usage is climbing and slows back down when stable, with status icons in the menu bar (`↑` increasing, `↓` cooling down)
 - Launch at Login (macOS 13+, via SMAppService)
 - Display model name toggle
 

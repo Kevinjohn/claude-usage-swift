@@ -149,7 +149,7 @@ func fetchUsage(token: String) async throws -> UsageResponse {
     var request = URLRequest(url: url)
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-    request.setValue("ClaudeUsage-menubar/2.2.0", forHTTPHeaderField: "User-Agent")
+    request.setValue("ClaudeUsage-menubar/2.2.1", forHTTPHeaderField: "User-Agent")
 
     let (data, response): (Data, URLResponse)
     do {
@@ -379,21 +379,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         set { UserDefaults.standard.set(newValue, forKey: "dynamicRefreshEnabled") }
     }
 
+    // TODO: Add menu toggle for showDynamicIcon (currently no UI, default off)
+    var showDynamicIcon: Bool {
+        get { UserDefaults.standard.object(forKey: "showDynamicIcon") as? Bool ?? false }
+        set { UserDefaults.standard.set(newValue, forKey: "showDynamicIcon") }
+    }
+
     var effectiveDynamicLadder: [TimeInterval] {
-        let ceiling = min(refreshInterval, 900)
-        return dynamicRefreshLadder.filter { $0 <= ceiling }
+        return dynamicRefreshLadder.filter { $0 < refreshInterval }
     }
 
     var effectiveInterval: TimeInterval {
         guard dynamicRefreshEnabled else { return refreshInterval }
         let ladder = effectiveDynamicLadder
-        guard !ladder.isEmpty else { return refreshInterval }
-        let clampedIndex = min(dynamicTierIndex, ladder.count - 1)
-        return ladder[clampedIndex]
+        guard !ladder.isEmpty, dynamicTierIndex < ladder.count else { return refreshInterval }
+        return ladder[dynamicTierIndex]
     }
 
     // Current interval in seconds
-    var refreshInterval: TimeInterval = 900 {
+    var refreshInterval: TimeInterval = 1800 {
         didSet {
             UserDefaults.standard.set(refreshInterval, forKey: "refreshInterval")
             updateIntervalMenu()
@@ -534,7 +538,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Initialize dynamic refresh state
         if dynamicRefreshEnabled {
             let ladder = effectiveDynamicLadder
-            dynamicTierIndex = ladder.isEmpty ? 0 : ladder.count - 1
+            dynamicTierIndex = ladder.count  // At base rate (user's interval)
             dynamicPreviousPct = nil
             dynamicUnchangedCount = 0
             dynamicStatusIcon = "↻"
@@ -593,11 +597,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 // Unchanged — step up (slower) after 2 consecutive cycles
                 dynamicUnchangedCount += 1
                 if dynamicUnchangedCount >= 2 {
-                    dynamicTierIndex = min(dynamicTierIndex + 1, ladder.count - 1)
+                    dynamicTierIndex = min(dynamicTierIndex + 1, ladder.count)
                     dynamicUnchangedCount = 0
                 }
                 // ↓ if still cooling down from a faster tier, ↻ if back at base rate
-                if dynamicTierIndex >= ladder.count - 1 {
+                if dynamicTierIndex >= ladder.count {
                     dynamicStatusIcon = "↻"
                 } else {
                     dynamicStatusIcon = "↓"
@@ -633,7 +637,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         if dynamicRefreshEnabled {
             let ladder = effectiveDynamicLadder
-            dynamicTierIndex = ladder.count - 1  // Start at slowest
+            dynamicTierIndex = ladder.count  // Start at base rate (user's interval)
             dynamicPreviousPct = fiveHourPct
             dynamicUnchangedCount = 0
             dynamicStatusIcon = "↻"
@@ -722,7 +726,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         guard let pct = fiveHourPct else { return }
         let prefix = (showModelInMenuBar ? activeModelName.map { "\($0): " } : nil) ?? ""
-        let suffix = dynamicRefreshEnabled ? " \(dynamicStatusIcon)" : ""
+        let showIcon = dynamicRefreshEnabled && (dynamicStatusIcon != "↻" || showDynamicIcon)
+        let suffix = showIcon ? " \(dynamicStatusIcon)" : ""
         var (text, color) = generateMenuBarText(pct: pct, resetString: fiveHourResetString, prefix: prefix, suffix: suffix)
 
         // Stale data indicator
@@ -776,7 +781,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 dynamicUnchangedCount = 0
                 dynamicStatusIcon = "↻"
                 let ladder = effectiveDynamicLadder
-                if !ladder.isEmpty { dynamicTierIndex = ladder.count - 1 }
+                dynamicTierIndex = ladder.count
                 updateDynamicStatusItem()
             }
 

@@ -49,12 +49,13 @@ Everything lives in `ClaudeUsage.swift` (~800 lines), organized as:
   - `updateDynamicStatusItem()` — updates the "Current: Xm" menu item in the Refresh Interval submenu; shows arrow icon for `↑`/`↓` states, hidden when dynamic refresh is off
   - `toggleDynamicRefresh()` — toggles dynamic refresh mode, persisted via `dynamicRefreshEnabled` UserDefault
   - `effectiveInterval` — computed property returning `refreshInterval` when dynamic is off, or the current tier interval when on
-  - `effectiveDynamicLadder` — filters `dynamicRefreshLadder` to tiers <= `min(refreshInterval, 900)`
+  - `effectiveDynamicLadder` — filters `dynamicRefreshLadder` to tiers strictly less than `refreshInterval`; at idle the timer uses the user's base interval
+  - `showDynamicIcon` — UserDefaults-backed toggle (default off) controlling whether the idle `↻` icon appears in the menu bar; `↑`/`↓` arrows always display regardless
 
 Key design decisions:
 - Runs as a UIElement (LSUIElement=true) — no dock icon
 - Credentials come from Claude Code's Keychain entry ("Claude Code-credentials"), so Claude Code must be installed and logged in
-- Refresh interval is user-configurable (1/5/15/30/60 min, default 15 min) and persisted via UserDefaults
+- Refresh interval is user-configurable (1/5/15/30/60 min, default 30 min) and persisted via UserDefaults
 - Menu bar shows percentage + inline countdown with adaptive detail: <30% percentage only, 30–60% adds hours, 61%+ shows full h:m countdown
 - A `displayTimer` (60s) updates the countdown text and relative time between API refreshes
 - Stale data indicator: appends "(stale)" to menu bar text when last successful fetch was > 2x refresh interval ago
@@ -67,7 +68,7 @@ Key design decisions:
 - `refresh()` uses `Task {}` with async/await; UI updates run on `MainActor`
 - `applicationWillTerminate` invalidates both timers
 - Build script applies ad-hoc code signing (`codesign --sign -`)
-- Dynamic refresh: adaptive polling that speeds up when usage is increasing and slows down when idle. Uses a tier ladder [1m, 2m, 5m, 15m], ceiling capped at `min(user interval, 900s)`. Steps down on usage increase, steps up after 2 unchanged cycles. Toggle via "Dynamic refresh" in Refresh Interval submenu, persisted via UserDefaults. Resets on new reset cycle. Stale data indicator still uses user's base `refreshInterval`. `dynamicStatusIcon` tracks current state and appends a trailing icon to menu bar text when dynamic refresh is enabled: `↑` (usage increasing, polling faster), `↓` (polling slowing back down toward base rate), `↻` (idle at base rate).
+- Dynamic refresh: adaptive polling that speeds up when usage is increasing and slows down when idle. Uses a tier ladder [1m, 2m, 5m, 15m], with faster tiers strictly below the user's base interval. At idle, falls back to the user's chosen refresh interval. Steps down on usage increase, steps up after 2 unchanged cycles. Toggle via "Dynamic refresh" in Refresh Interval submenu, persisted via UserDefaults. Resets on new reset cycle. Stale data indicator still uses user's base `refreshInterval`. `dynamicStatusIcon` tracks current state: `↑` (usage increasing, polling faster) and `↓` (polling slowing back down) always display in the menu bar; `↻` (idle at base rate) only displays when `showDynamicIcon` is enabled (default off).
 
 ## Testing
 
