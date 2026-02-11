@@ -4,7 +4,7 @@ import UserNotifications
 
 // MARK: - Version
 
-private let appVersion = "2.3.0"
+private let appVersion = "2.3.1"
 
 // MARK: - Usage API
 
@@ -380,7 +380,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Reset notifications
     var resetNotifyItem: NSMenuItem!
     var resetNotificationsEnabled: Bool {
-        get { UserDefaults.standard.object(forKey: "resetNotificationsEnabled") as? Bool ?? false }
+        get { UserDefaults.standard.object(forKey: "resetNotificationsEnabled") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "resetNotificationsEnabled") }
     }
     var previousWeeklyPct: Int?

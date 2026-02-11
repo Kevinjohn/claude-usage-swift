@@ -2,11 +2,16 @@
 
 All notable changes to this project are documented here.
 
+## [v2.3.1] - 2026-02-11
+
+### Changed
+- Reset notifications now default to on (was off in v2.3.0)
+
 ## [v2.3.0] - 2026-02-11
 
 ### Added
 - "Reset to 0%" notification — macOS notification fires when any usage category (5-hour, Weekly, Sonnet, Extra) drops from >0% to 0%
-- "Notifications" submenu with toggle for reset alerts (default off, persisted via UserDefaults)
+- "Notifications" submenu with toggle for reset alerts (default on, persisted via UserDefaults)
 - Re-enabled UserNotifications framework
 
 ## [v2.2.7] - 2026-02-11
@@ -113,6 +118,7 @@ All notable changes to this project are documented here.
 - 5-hour and weekly limit display
 - Keychain-based authentication via Claude Code credentials
 
+[v2.3.1]: https://github.com/Kevinjohn/claude-usage-swift/releases/tag/v2.3.1
 [v2.3.0]: https://github.com/Kevinjohn/claude-usage-swift/releases/tag/v2.3.0
 [v2.2.7]: https://github.com/Kevinjohn/claude-usage-swift/releases/tag/v2.2.7
 [v2.2.6]: https://github.com/Kevinjohn/claude-usage-swift/releases/tag/v2.2.6

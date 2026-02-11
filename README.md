@@ -33,7 +33,7 @@ A native macOS menu bar app that shows your Claude API usage, reset countdowns, 
 
 **Alerts**
 - Reset notification — macOS push notification when any usage category resets to 0%
-- Toggle via Notifications > Reset to 0% submenu (default off)
+- Toggle via Notifications > Reset to 0% submenu (on by default)
 
 **Preferences**
 - Refresh interval: 1, 5, 15, 30, or 60 minutes (default: 30 min)
