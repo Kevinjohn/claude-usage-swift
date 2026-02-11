@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here.
 
+## [v2.2.4] - 2026-02-11
+
+### Improved
+- Right-align reset times in dropdown menu — usage rows use a tabbed column layout so percentages and "(resets X)" text form clean vertical columns
+
 ## [v2.2.3] - 2026-02-11
 
 ### Improved

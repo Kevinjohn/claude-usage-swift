@@ -4,7 +4,7 @@ import UserNotifications
 
 // MARK: - Version
 
-private let appVersion = "2.2.3"
+private let appVersion = "2.2.4"
 
 // MARK: - Usage API
 
@@ -742,6 +742,7 @@ extension AppDelegate {
             updateMenuBarText()
             let reset = h.resets_at.map { formatReset($0) } ?? "--"
             fiveHourItem.title = "5-hour: \(pct)% (resets \(reset))"
+            fiveHourItem.attributedTitle = tabbedMenuItemString(left: "5-hour: \(pct)%", right: "(resets \(reset))")
 
             // New reset timestamp means a new usage cycle — clear stale state
             let storedResetAt = UserDefaults.standard.string(forKey: "lastResetAt")
@@ -777,6 +778,7 @@ extension AppDelegate {
             fiveHourResetString = nil
             setMenuBarText("N/A")
             fiveHourItem.title = "5-hour: N/A"
+            fiveHourItem.attributedTitle = nil
             rateItem.isHidden = true
         }
 
@@ -784,14 +786,17 @@ extension AppDelegate {
         if let d = usage.seven_day {
             let reset = d.resets_at.map { formatReset($0) } ?? "--"
             weeklyItem.title = "Weekly: \(Int(d.utilization))% (resets \(reset))"
+            weeklyItem.attributedTitle = tabbedMenuItemString(left: "Weekly: \(Int(d.utilization))%", right: "(resets \(reset))")
         }
 
         // Sonnet
         if let s = usage.seven_day_sonnet {
             let reset = s.resets_at.map { formatReset($0) } ?? "--"
             sonnetItem.title = "Sonnet: \(Int(s.utilization))% (resets \(reset))"
+            sonnetItem.attributedTitle = tabbedMenuItemString(left: "Sonnet: \(Int(s.utilization))%", right: "(resets \(reset))")
         } else {
             sonnetItem.title = "Sonnet: --"
+            sonnetItem.attributedTitle = nil
         }
 
         // Extra (API returns cents, display as dollars)
@@ -825,6 +830,20 @@ extension AppDelegate {
                 .font: font
             ])
         }
+    }
+
+    func tabbedMenuItemString(left: String, right: String) -> NSAttributedString {
+        let menuFont = NSFont.menuFont(ofSize: 0)
+        // Tab position just past the widest possible left column
+        let maxLeftWidth = ["5-hour: 100%", "Weekly: 100%", "Sonnet: 100%"]
+            .map { ($0 as NSString).size(withAttributes: [.font: menuFont]).width }
+            .max() ?? 100
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.tabStops = [NSTextTab(textAlignment: .left, location: ceil(maxLeftWidth) + 8)]
+        return NSAttributedString(string: "\(left)\t\(right)", attributes: [
+            .font: menuFont,
+            .paragraphStyle: paragraphStyle
+        ])
     }
 
     func generateMenuBarText(pct: Int, resetString: String?, prefix: String = "", suffix: String = "") -> (text: String, color: NSColor) {
@@ -870,8 +889,11 @@ extension AppDelegate {
         fiveHourResetString = nil
         setMenuBarText(error.menuBarText)
         fiveHourItem.title = "5-hour: \(error.description)"
+        fiveHourItem.attributedTitle = nil
         weeklyItem.title = "Weekly: --"
+        weeklyItem.attributedTitle = nil
         sonnetItem.title = "Sonnet: --"
+        sonnetItem.attributedTitle = nil
         extraItem.title = "Extra: --"
         rateItem.isHidden = true
 
