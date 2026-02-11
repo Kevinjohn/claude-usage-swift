@@ -6,11 +6,11 @@ A native macOS menu bar app that shows your Claude API usage, reset countdowns, 
 ![Swift](https://img.shields.io/badge/Swift-5.9+-orange)
 ![Memory](https://img.shields.io/badge/RAM-~50MB-green)
 
-## Screenshot / Demo
+## Screenshots
 
-![Claude Usage dropdown](screenshot.png)
+![Menu bar showing usage percentage with model name](screenshot-menubar.png)
 
-![Hover countdown demo](hover-demo.gif)
+![Dropdown menu with usage breakdown and options](screenshot-menu-open.png)
 
 ## Features
 
