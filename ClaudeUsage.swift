@@ -4,7 +4,7 @@ import UserNotifications
 
 // MARK: - Version
 
-private let appVersion = "2.4.0"
+private let appVersion = "2.4.1"
 
 // MARK: - Usage API
 
@@ -336,6 +336,51 @@ func shortModelName(_ modelId: String) -> String {
     return String(modelId.prefix(12))
 }
 
+// MARK: - Update Checker
+
+/// Semantic version comparison: returns true if `remote` is newer than `local`.
+/// Strips "v" prefix and any pre-release suffix (e.g. "-beta"), splits by ".",
+/// compares numerically with zero-padding for unequal lengths.
+func isNewerVersion(remote: String, local: String) -> Bool {
+    func normalize(_ v: String) -> [Int] {
+        let stripped = v.hasPrefix("v") ? String(v.dropFirst()) : v
+        let base = stripped.split(separator: "-").first.map(String.init) ?? stripped
+        return base.split(separator: ".").compactMap { Int($0) }
+    }
+    let r = normalize(remote)
+    let l = normalize(local)
+    let count = max(r.count, l.count)
+    for i in 0..<count {
+        let rv = i < r.count ? r[i] : 0
+        let lv = i < l.count ? l[i] : 0
+        if rv > lv { return true }
+        if rv < lv { return false }
+    }
+    return false
+}
+
+/// Checks GitHub for the latest release, at most once per 24 hours.
+/// On success, caches the version and timestamp in UserDefaults.
+/// On any failure, returns silently without clearing cached state.
+func checkForUpdate() async {
+    let defaults = UserDefaults.standard
+    let lastCheck = defaults.double(forKey: "lastUpdateCheckTime")
+    if lastCheck > 0 && Date().timeIntervalSince1970 - lastCheck < 86400 { return }
+
+    guard let url = URL(string: "https://api.github.com/repos/cfranci/claude-usage-swift/releases/latest") else { return }
+    var request = URLRequest(url: url)
+    request.timeoutInterval = 15
+    request.setValue("ClaudeUsage-menubar/\(appVersion)", forHTTPHeaderField: "User-Agent")
+
+    guard let (data, response) = try? await urlSession.data(for: request),
+          let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
+          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let tagName = json["tag_name"] as? String else { return }
+
+    defaults.set(Date().timeIntervalSince1970, forKey: "lastUpdateCheckTime")
+    defaults.set(tagName, forKey: "latestKnownVersion")
+}
+
 // MARK: - Dynamic Refresh Ladder
 
 let dynamicRefreshLadder: [TimeInterval] = [60, 120, 300, 900]  // 1m, 2m, 5m, 15m
@@ -356,7 +401,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var activeModelName: String?
 
     // Menu items
-    // modelItem removed — static "Claude Code usage:" header used instead
+    var headerItem: NSMenuItem!
     var fiveHourItem: NSMenuItem!
     var weeklyItem: NSMenuItem!
     var sonnetItem: NSMenuItem!
@@ -375,6 +420,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var showModelInMenuBar: Bool {
         get { UserDefaults.standard.object(forKey: "showModelInMenuBar") as? Bool ?? false }
         set { UserDefaults.standard.set(newValue, forKey: "showModelInMenuBar") }
+    }
+
+    // Update checker
+    var latestKnownVersion: String? {
+        get { UserDefaults.standard.string(forKey: "latestKnownVersion") }
+        set { UserDefaults.standard.set(newValue, forKey: "latestKnownVersion") }
     }
 
     // Reset notifications
@@ -473,6 +524,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Initial fetch
         refresh()
 
+        // Check for updates
+        updateHeaderFromCache()
+        Task {
+            await checkForUpdate()
+            await MainActor.run { self.updateHeaderFromCache() }
+        }
+
         // Start timer
         restartTimer()
         startDisplayTimer()
@@ -500,6 +558,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         restartTimer()
         startDisplayTimer()
         refresh()
+
+        // Re-check for updates if 24h elapsed during sleep
+        Task {
+            await checkForUpdate()
+            await MainActor.run { self.updateHeaderFromCache() }
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -515,7 +579,7 @@ extension AppDelegate {
     private func buildMenu() -> NSMenu {
         let menu = NSMenu()
 
-        let headerItem = NSMenuItem(title: "Claude Code usage:", action: nil, keyEquivalent: "")
+        headerItem = NSMenuItem(title: "Claude Code usage:", action: nil, keyEquivalent: "")
         fiveHourItem = NSMenuItem(title: "5-hour: ...", action: nil, keyEquivalent: "")
         weeklyItem = NSMenuItem(title: "Weekly: ...", action: nil, keyEquivalent: "")
         sonnetItem = NSMenuItem(title: "Sonnet: ...", action: nil, keyEquivalent: "")
@@ -985,6 +1049,24 @@ extension AppDelegate {
 // MARK: - User Actions
 
 extension AppDelegate {
+    func updateHeaderFromCache() {
+        if let version = latestKnownVersion, isNewerVersion(remote: version, local: appVersion) {
+            headerItem.title = "Update available: \(version)"
+            headerItem.action = #selector(openReleasesPage)
+            headerItem.target = self
+        } else {
+            headerItem.title = "Claude Code usage:"
+            headerItem.action = nil
+            headerItem.target = nil
+        }
+    }
+
+    @objc func openReleasesPage() {
+        if let url = URL(string: "https://github.com/cfranci/claude-usage-swift/releases/latest") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     @objc func toggleShowModel() {
         showModelInMenuBar.toggle()
         showModelItem.state = showModelInMenuBar ? .on : .off

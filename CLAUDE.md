@@ -37,6 +37,7 @@ Everything lives in `ClaudeUsage.swift` (~1000 lines), organized as:
 - **Color helper**: `colorForPercentage()` maps usage percentage to NSColor using `DisplayThresholds` breakpoints — grey (<30%), green (30–60%), yellow (61–80%), orange (81–90%), red (91%+)
 - **Snapshot helpers**: `loadSnapshots()`, `saveSnapshot(pct:)`, `computeRateString()` — track usage over time, compute %/hr rate and estimated time to limit
 - **Model detection**: `readActiveModel()` reads `~/.claude.json` to find the most-used model across projects; `shortModelName()` converts full model IDs (e.g. `claude-opus-4-6`) to short lowercase names (`opus`, `sonnet`, `haiku`)
+- **Update checker**: `isNewerVersion(remote:local:)` performs semantic version comparison with prefix/suffix stripping and zero-padding; `checkForUpdate()` queries the GitHub Releases API at most once per 24 hours and caches the result in UserDefaults
 - **Dynamic refresh ladder**: module-level `dynamicRefreshLadder` constant `[60, 120, 300, 900]` — tiers for adaptive polling
 - **AppDelegate** (main class): all stored/computed properties, `applicationDidFinishLaunching`, `applicationWillTerminate`, `startDisplayTimer()`, `handleSleep()`, `handleWake()`
 - **AppDelegate extensions** (5 logical groups, each with `// MARK: -` for Xcode jump-bar navigation):
@@ -44,7 +45,7 @@ Everything lives in `ClaudeUsage.swift` (~1000 lines), organized as:
   - **Refresh & Timer**: `updateIntervalMenu()`, `restartTimer()` (includes 10% timer tolerance for power efficiency), `adjustDynamicInterval(newPct:)` (core dynamic refresh logic: steps down on usage increase, steps up after 2 unchanged cycles), `updateDynamicStatusItem()`, `toggleDynamicRefresh()`, `setInterval(_:)`, `refresh()`, `updateUI(usage:)`
   - **Display**: `setMenuBarText(_:color:)` (11pt monospaced-digit font; adds a 1px rounded outline box around the menu bar text using the button's CALayer, with 50% opacity border color matching the usage color and 4pt corner radius), `tabbedMenuItemString(left:right:)` (creates `NSAttributedString` with left-aligned tab stop for column-aligned reset times in dropdown), `generateMenuBarText(pct:resetString:prefix:suffix:)` (shared by `updateMenuBarText()` and `testPercentage()`), `updateMenuBarText()`, `showError(_:)`, `updateRelativeTime()`
   - **Alerts**: `sendResetNotification(category:)` fires a macOS notification when a usage category resets to 0%; `toggleResetNotifications()` toggles the "Notifications > Reset to 0%" menu item
-  - **User Actions**: `toggleShowModel()`, `openDashboard()`, `copyUsage()`, `toggleLaunchAtLogin()`, `testPercentage(_:)`, `clearTestDisplay()`, `quit()`
+  - **User Actions**: `updateHeaderFromCache()`, `openReleasesPage()`, `toggleShowModel()`, `openDashboard()`, `copyUsage()`, `toggleLaunchAtLogin()`, `testPercentage(_:)`, `clearTestDisplay()`, `quit()`
   - `effectiveInterval` — computed property returning `refreshInterval` when dynamic is off, or the current tier interval when on
   - `effectiveDynamicLadder` — filters `dynamicRefreshLadder` to tiers strictly less than `refreshInterval`; at idle the timer uses the user's base interval
   - `showDynamicIcon` — UserDefaults-backed toggle (default off) controlling whether the idle `↻` icon appears in the menu bar; `↑`/`↓` arrows always display regardless
@@ -68,6 +69,7 @@ Key design decisions:
 - Timer tolerance: both timers set a `tolerance` (10s for display, 10% of interval for API refresh, minimum 10s) so macOS can coalesce wake-ups with other system activity, reducing battery impact
 - Build script applies ad-hoc code signing (`codesign --sign -`)
 - Dynamic refresh: adaptive polling that speeds up when usage is increasing and slows down when idle. Uses a tier ladder [1m, 2m, 5m, 15m], with faster tiers strictly below the user's base interval. At idle, falls back to the user's chosen refresh interval. Steps down on usage increase, steps up after 2 unchanged cycles. Toggle via "Dynamic refresh" in Refresh Interval submenu, persisted via UserDefaults. Resets on new reset cycle. Stale data indicator still uses user's base `refreshInterval`. `dynamicStatusIcon` tracks current state: `↑` (usage increasing, polling faster) and `↓` (polling slowing back down) always display in the menu bar; `↻` (idle at base rate) only displays when `showDynamicIcon` is enabled (default off).
+- Auto-update checker: checks GitHub Releases API once per 24 hours (on launch and wake). Caches `latestKnownVersion` and `lastUpdateCheckTime` in UserDefaults. When a newer version exists, the dropdown header changes from "Claude Code usage:" to "Update available: vX.Y.Z" and becomes clickable (opens releases page). Silent failure — never affects usage display. Self-healing: updating the app clears the banner automatically via `isNewerVersion` comparison against live `appVersion`.
 
 ## Testing
 
