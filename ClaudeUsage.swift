@@ -4,7 +4,7 @@ import UserNotifications
 
 // MARK: - Version
 
-private let appVersion = "2.5.4"
+private let appVersion = "2.5.5"
 
 // MARK: - Usage API
 
@@ -312,6 +312,9 @@ func computeRateString() -> String? {
     }
 
     let remaining = 100.0 - last.pct
+    guard remaining > 0 else {
+        return String(format: "~%.0f%%/hr", ratePerHour)
+    }
     let hoursToLimit = remaining / ratePerHour
 
     guard hoursToLimit < 100 else {
@@ -488,7 +491,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         set { UserDefaults.standard.set(newValue, forKey: "dynamicRefreshEnabled") }
     }
 
-    // TODO: Add menu toggle for showDynamicIcon (currently no UI, default off)
     var showDynamicIcon: Bool {
         get { UserDefaults.standard.object(forKey: "showDynamicIcon") as? Bool ?? false }
         set { UserDefaults.standard.set(newValue, forKey: "showDynamicIcon") }
@@ -951,10 +953,12 @@ extension AppDelegate {
             let reset = d.resets_at.map { formatReset($0) } ?? "--"
             weeklyItem.title = "Weekly: \(weeklyPct)% (resets \(reset))"
             weeklyItem.attributedTitle = tabbedMenuItemString(left: "Weekly: \(weeklyPct)%", right: "(resets \(reset))")
+        } else {
+            weeklyItem.title = "Weekly: --"
+            weeklyItem.attributedTitle = nil
         }
 
         // Sonnet
-        sonnetItem.isHidden = false
         if let s = usage.seven_day_sonnet {
             let sonnetPct = Int(s.utilization)
             if let prev = previousSonnetPct, prev > 0, sonnetPct == 0 { sendResetNotification(category: "Sonnet") }
@@ -1093,7 +1097,6 @@ extension AppDelegate {
             weeklyItem.title = "Weekly: --"
             weeklyItem.attributedTitle = nil
             sonnetItem.title = "Sonnet: --"
-            sonnetItem.isHidden = false
             sonnetItem.attributedTitle = nil
             extraItem.title = "Extra: --"
             extraItem.attributedTitle = nil

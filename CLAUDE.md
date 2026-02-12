@@ -23,7 +23,7 @@ Requires macOS 12.0+, Swift 5.9+, and Xcode Command Line Tools.
 
 ## Architecture
 
-Everything lives in `ClaudeUsage.swift` (~1000 lines), organized as:
+Everything lives in `ClaudeUsage.swift` (~1250 lines), organized as:
 
 - **Version constant**: `appVersion` — single source of truth for version string, extracted by `build.sh` into Info.plist
 - **Data models** (top): `UsageResponse`, `UsageLimit`, `ExtraUsage` — Codable structs matching the Anthropic OAuth usage API response; `UsageSnapshot` for tracking usage history
