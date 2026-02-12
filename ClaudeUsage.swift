@@ -459,6 +459,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Request notification permission so reset alerts can fire
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
 
+        // Pause timers during system sleep and display sleep (no point polling when nobody is looking)
+        let ws = NSWorkspace.shared.notificationCenter
+        ws.addObserver(self, selector: #selector(handleSleep), name: NSWorkspace.willSleepNotification, object: nil)
+        ws.addObserver(self, selector: #selector(handleWake), name: NSWorkspace.didWakeNotification, object: nil)
+        ws.addObserver(self, selector: #selector(handleSleep), name: NSWorkspace.screensDidSleepNotification, object: nil)
+        ws.addObserver(self, selector: #selector(handleWake), name: NSWorkspace.screensDidWakeNotification, object: nil)
+
         // Update checkmarks
         updateIntervalMenu()
         updateDynamicStatusItem()
@@ -468,17 +475,37 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Start timer
         restartTimer()
+        startDisplayTimer()
+    }
 
+    func startDisplayTimer() {
+        displayTimer?.invalidate()
         // Separate from refresh timer — updates countdown text without API calls
         displayTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             self?.updateMenuBarText()
             self?.updateRelativeTime()
         }
+        displayTimer?.tolerance = 10  // Let macOS coalesce with other wake-ups
+    }
+
+    @objc func handleSleep() {
+        timer?.invalidate()
+        timer = nil
+        displayTimer?.invalidate()
+        displayTimer = nil
+    }
+
+    @objc func handleWake() {
+        // Restart timers and fetch fresh data — the old data is stale after sleep
+        restartTimer()
+        startDisplayTimer()
+        refresh()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         timer?.invalidate()
         displayTimer?.invalidate()
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
     }
 }
 
@@ -624,6 +651,7 @@ extension AppDelegate {
         timer = Timer.scheduledTimer(withTimeInterval: effectiveInterval, repeats: true) { [weak self] _ in
             self?.refresh()
         }
+        timer?.tolerance = max(10, effectiveInterval * 0.1)  // 10% tolerance, min 10s
     }
 
     func adjustDynamicInterval(newPct: Int) {
