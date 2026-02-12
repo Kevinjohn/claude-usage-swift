@@ -4,7 +4,7 @@ import UserNotifications
 
 // MARK: - Version
 
-private let appVersion = "2.6.4"
+private let appVersion = "2.6.5"
 
 // MARK: - Usage API
 
@@ -730,17 +730,6 @@ extension AppDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
-        // Action items
-        let dashboardItem = NSMenuItem(title: "Open platform.claude.com", action: #selector(openDashboard), keyEquivalent: "d")
-        dashboardItem.target = self
-        menu.addItem(dashboardItem)
-
-        let copyItem = NSMenuItem(title: "Copy Usage", action: #selector(copyUsage), keyEquivalent: "c")
-        copyItem.target = self
-        menu.addItem(copyItem)
-
-        menu.addItem(NSMenuItem.separator())
-
         // Menu bar text prefix submenu
         let menuBarTextMenu = NSMenu()
         let menuBarTextModes: [(String, String)] = [("Off", "off"), ("Claude", "claude"), ("CC", "cc"), ("Model Name", "model"), ("5 Hour", "5hour")]
@@ -813,6 +802,17 @@ extension AppDelegate {
             launchAtLoginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
             menu.addItem(launchAtLoginItem)
         }
+
+        menu.addItem(NSMenuItem.separator())
+
+        // Action items
+        let dashboardItem = NSMenuItem(title: "Open platform.claude.com", action: #selector(openDashboard), keyEquivalent: "d")
+        dashboardItem.target = self
+        menu.addItem(dashboardItem)
+
+        let copyItem = NSMenuItem(title: "Copy usage to clipboard", action: #selector(copyUsage), keyEquivalent: "c")
+        copyItem.target = self
+        menu.addItem(copyItem)
 
         menu.addItem(NSMenuItem.separator())
 
