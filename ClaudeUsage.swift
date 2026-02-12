@@ -4,7 +4,7 @@ import UserNotifications
 
 // MARK: - Version
 
-private let appVersion = "2.3.3"
+private let appVersion = "2.4.0"
 
 // MARK: - Usage API
 
