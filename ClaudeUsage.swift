@@ -4,7 +4,7 @@ import UserNotifications
 
 // MARK: - Version
 
-private let appVersion = "2.6.2"
+private let appVersion = "2.6.3"
 
 // MARK: - Usage API
 
@@ -798,6 +798,7 @@ extension AppDelegate {
         notificationsItem.submenu = notificationsMenu
         menu.addItem(notificationsItem)
 
+        menu.addItem(NSMenuItem.separator())
         if #available(macOS 13.0, *) {
             launchAtLoginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
             launchAtLoginItem.target = self
