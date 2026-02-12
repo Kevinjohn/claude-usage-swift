@@ -4,7 +4,7 @@ import UserNotifications
 
 // MARK: - Version
 
-private let appVersion = "2.5.0"
+private let appVersion = "2.5.1"
 
 // MARK: - Usage API
 
@@ -99,12 +99,22 @@ enum UsageError: Error, CustomStringConvertible {
 
     var hint: String? {
         switch self {
-        case .httpError(let code) where code == 401 || code == 403:
-            return "Try: log in at console.anthropic.com, or\nstart Claude Code to refresh your token"
         case .keychainNotFound:
             return "Try: open Claude Code and log in"
-        default:
-            return nil
+        case .keychainParseFailure:
+            return "Try: run `claude` in your terminal to\nrefresh your login, or reinstall Claude Code"
+        case .networkError:
+            return "Check your internet connection and try\nRefresh from the menu"
+        case .httpError(let code) where code == 401 || code == 403:
+            return "Try: log in at console.anthropic.com, or\nstart Claude Code to refresh your token"
+        case .httpError(let code) where code == 429:
+            return "Rate limited — wait a moment and try\nRefresh from the menu"
+        case .httpError(let code) where code >= 500 && code < 600:
+            return "Anthropic API is having issues —\ntry again later"
+        case .httpError:
+            return "Unexpected error — try Refresh from\nthe menu, or check status.anthropic.com"
+        case .decodingError:
+            return "The API response format may have changed —\ncheck for an app update"
         }
     }
 }
