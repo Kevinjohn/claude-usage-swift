@@ -18,7 +18,9 @@ A native macOS menu bar app that shows your Claude API usage, reset countdowns, 
 - Live usage percentage with color-coded status
 - Adaptive countdown — low usage shows percentage only, moderate adds hours, high shows full h:m countdown
 - Stale data indicator when the last fetch exceeds 2x the refresh interval
-- Optional active model name prefix (e.g. `opus: 45% / 2h 30m`)
+- Configurable prefix text (Off, Claude, CC, Model Name, 5 Hour) — e.g. `opus: 45% / 2h 30m`
+- Optional weekly and sonnet usage alongside 5-hour — e.g. `45% | weekly: 72% | sonnet: 38%`
+- Each section independently color-coded to match usage thresholds
 
 **Usage Tracking**
 - 5-hour session usage with reset countdown
@@ -39,12 +41,14 @@ A native macOS menu bar app that shows your Claude API usage, reset countdowns, 
 - Refresh interval: 1, 5, 15, 30, or 60 minutes (default: 30 min)
 - Dynamic refresh — adaptive polling that speeds up when usage is climbing and slows back down when stable, with status icons in the menu bar (`↑` increasing, `↓` cooling down)
 - Launch at Login (macOS 13+, via SMAppService)
-- Display model name toggle
+- Display menu bar text — prefix options: Off, Claude, CC, Model Name, 5 Hour
+- Display weekly/sonnet usage — show in menu bar with threshold modes: Off, Medium (>50%), High (>75%), Always
+- Label toggles — show or hide `weekly:` / `sonnet:` label text in the menu bar
 
 **Utilities**
 - Copy all usage stats to clipboard
 - Open Anthropic usage dashboard
-- Test Display mode — preview color thresholds at 10/40/75/85/95%
+- Test Display mode — preview color thresholds, error states, weekly display, and sonnet display
 
 **Lightweight**
 - Single Swift file, zero dependencies, no Xcode project
@@ -113,7 +117,9 @@ The menu bar adjusts detail based on how close you are to your limit:
 | 30–60%      | Percentage + hours     | `45% / 2h`          |
 | 61%+        | Percentage + full time | `78% / 2h 30m`      |
 
-With model display enabled, the model name is prepended: `opus: 45% / 2h 30m`
+With a prefix enabled (e.g. Model Name), the prefix is prepended: `opus: 45% / 2h 30m`
+
+With weekly or sonnet display enabled, additional sections appear with independent colors: `45% / 2h | weekly: 72% | sonnet: 38%`
 
 ### Dynamic Refresh Icons
 
@@ -134,7 +140,7 @@ If something goes wrong, the menu bar shows a short code instead of usage:
 | Indicator | Meaning                                                    |
 |-----------|------------------------------------------------------------|
 | `key?`    | Keychain entry not found — Claude Code not installed or not logged in |
-| `net?`    | Network error — check your internet connection             |
+| `network?`| Network error — check your internet connection             |
 | `auth?`   | Authentication failed (HTTP 401/403) — try logging into Claude Code again |
 | `http?`   | Other HTTP error from Anthropic API                        |
 | `json?`   | API response could not be decoded                          |

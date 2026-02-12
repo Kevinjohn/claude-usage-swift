@@ -23,7 +23,7 @@ Requires macOS 12.0+, Swift 5.9+, and Xcode Command Line Tools.
 
 ## Architecture
 
-Everything lives in `ClaudeUsage.swift` (~1250 lines), organized as:
+Everything lives in `ClaudeUsage.swift` (~1560 lines), organized as:
 
 - **Version constant**: `appVersion` — single source of truth for version string, extracted by `build.sh` into Info.plist
 - **Data models** (top): `UsageResponse`, `UsageLimit`, `ExtraUsage` — Codable structs matching the Anthropic OAuth usage API response; `UsageSnapshot` for tracking usage history
@@ -43,9 +43,9 @@ Everything lives in `ClaudeUsage.swift` (~1250 lines), organized as:
 - **AppDelegate extensions** (5 logical groups, each with `// MARK: -` for Xcode jump-bar navigation):
   - **Menu Construction**: `buildMenu()` — constructs the full dropdown NSMenu
   - **Refresh & Timer**: `updateIntervalMenu()`, `restartTimer()` (includes 10% timer tolerance for power efficiency), `adjustDynamicInterval(newPct:)` (core dynamic refresh logic: steps down on usage increase, steps up after 2 unchanged cycles), `updateDynamicStatusItem()`, `toggleDynamicRefresh()`, `setInterval(_:)`, `refresh()`, `updateUI(usage:)`
-  - **Display**: `setMenuBarText(_:color:)` (11pt monospaced-digit font; adds a 1px rounded outline box around the menu bar text using the button's CALayer, with 50% opacity border color matching the usage color and 4pt corner radius), `tabbedMenuItemString(left:right:)` (creates `NSAttributedString` with left-aligned tab stop for column-aligned reset times in dropdown), `generateMenuBarText(pct:resetString:prefix:suffix:)` (shared by `updateMenuBarText()` and `testPercentage()`), `updateMenuBarText()`, `showError(_:)` (displays colored error text in menu bar — yellow by default, red for 429 — and error hint section with actionable guidance; in test mode, preserves cached state so `clearTestDisplay()` restores instantly without an API call), `updateRelativeTime()`
+  - **Display**: `setMenuBarText(_:color:)` (11pt monospaced-digit font; adds a 1px rounded outline box around the menu bar text using the button's CALayer, with 50% opacity border color matching the usage color and 4pt corner radius), `setMenuBarAttributedText(_:borderColor:)` (multi-colored `NSMutableAttributedString` support for weekly/sonnet sections with independent colors), `applyMenuBarBorder(color:)` (private helper extracting shared CALayer border logic), `tabbedMenuItemString(left:right:)` (creates `NSAttributedString` with left-aligned tab stop for column-aligned reset times in dropdown), `generateMenuBarText(pct:resetString:prefix:suffix:)` (shared by `updateMenuBarText()` and `testPercentage()`), `updateMenuBarText()`, `showError(_:)` (displays colored error text in menu bar — yellow by default, red for 429 — and error hint section with actionable guidance; in test mode, preserves cached state so `clearTestDisplay()` restores instantly without an API call), `updateRelativeTime()`
   - **Alerts**: `sendResetNotification(category:)` fires a macOS notification when a usage category resets to 0%; `toggleResetNotifications()` toggles the "Notifications > Reset to 0%" menu item
-  - **User Actions**: `updateHeaderFromCache()`, `openReleasesPage()`, `toggleShowModel()`, `openDashboard()`, `copyUsage()`, `toggleLaunchAtLogin()`, `testPercentage(_:)`, `testError(_:)`, `clearTestDisplay()`, `quit()`
+  - **User Actions**: `updateHeaderFromCache()`, `openReleasesPage()`, `setMenuBarTextMode(_:)`, `updateMenuBarTextModeMenu()`, `toggleWeeklyLabel()`, `toggleSonnetLabel()`, `setWeeklyMode(_:)`, `updateWeeklyModeMenu()`, `setSonnetMode(_:)`, `updateSonnetModeMenu()`, `openDashboard()`, `copyUsage()`, `toggleLaunchAtLogin()`, `testPercentage(_:)`, `testWeekly(_:)`, `testSonnet(_:)`, `testError(_:)`, `clearTestDisplay()`, `quit()`
   - `effectiveInterval` — computed property returning `refreshInterval` when dynamic is off, or the current tier interval when on
   - `effectiveDynamicLadder` — filters `dynamicRefreshLadder` to tiers strictly less than `refreshInterval`; at idle the timer uses the user's base interval
   - `showDynamicIcon` — UserDefaults-backed toggle (default off) controlling whether the idle `↻` icon appears in the menu bar; `↑`/`↓` arrows always display regardless
@@ -59,8 +59,10 @@ Key design decisions:
 - Stale data indicator: appends "(stale)" to menu bar text when last successful fetch was > 2x refresh interval ago
 - Usage rate tracking: snapshots stored in UserDefaults, pruned to 6h / 100 entries, cleared on reset cycle change
 - Reset notifications: macOS notifications when any category drops from >0% to 0%, toggled via "Notifications > Reset to 0%" submenu (default on)
-- Test Display submenu contains "Test Thresholds" (preview color thresholds at 10/40/75/85/95%) and "Test Errors" (simulate keychain, network, auth, rate-limit, server, decoding errors) nested submenus; both prepend "TEST: " to the menu bar text while active
-- "Display model name" toggle prepends active model to menu bar text (e.g. `opus: 45%`), persisted via UserDefaults
+- Test Display submenu contains "Test Thresholds" (preview color thresholds at 10/40/75/85/95%), "Test Errors" (simulate keychain, network, auth, rate-limit, server, decoding errors), "Test Weekly" (preview weekly display at 60/85/25%), and "Test Sonnet" (preview sonnet display at 60/85/25%) nested submenus; all prepend "TEST: " to the menu bar text while active
+- "Display menu bar text" submenu with prefix options: Off (default), Claude, CC, Model Name, 5 Hour — prepends the selected label to the menu bar text (e.g. `opus: 45%`, `CC: 45%`), persisted via UserDefaults; also contains "Weekly" and "Sonnet" label toggles (below a separator) controlling whether `weekly:` / `sonnet:` text appears alongside the percentage
+- "Display weekly usage" submenu with threshold modes: Off (default), Medium (>50%), High (>75%), Always — when active, appends weekly usage to the menu bar (e.g. ` | weekly: 72%`) with independent color from `colorForPercentage()`; persisted via UserDefaults
+- "Display sonnet usage" submenu with identical threshold modes — appends sonnet usage to the menu bar (e.g. ` | sonnet: 38%`) with independent color; persisted via UserDefaults
 - Launch at Login via SMAppService (macOS 13+)
 - Menu bar uses 11pt monospaced-digit system font for compact, aligned display, wrapped in a subtle 1px rounded outline box (50% opacity, 4pt corner radius) for visual distinction
 - `refresh()` uses `Task {}` with async/await; UI updates run on `MainActor`

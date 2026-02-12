@@ -4,7 +4,7 @@ import UserNotifications
 
 // MARK: - Version
 
-private let appVersion = "2.5.5"
+private let appVersion = "2.6.0"
 
 // MARK: - Usage API
 
@@ -451,11 +451,52 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Launch at login
     var launchAtLoginItem: NSMenuItem!
 
-    // Show Model in Menu Bar
-    var showModelItem: NSMenuItem!
-    var showModelInMenuBar: Bool {
-        get { UserDefaults.standard.object(forKey: "showModelInMenuBar") as? Bool ?? false }
-        set { UserDefaults.standard.set(newValue, forKey: "showModelInMenuBar") }
+    // Menu Bar Text Prefix
+    var menuBarTextItem: NSMenuItem!
+    var menuBarTextModeItems: [NSMenuItem] = []
+    var showWeeklyLabelItem: NSMenuItem!
+    var showWeeklyLabel: Bool {
+        get { UserDefaults.standard.object(forKey: "showWeeklyLabel") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "showWeeklyLabel") }
+    }
+    var showSonnetLabelItem: NSMenuItem!
+    var showSonnetLabel: Bool {
+        get { UserDefaults.standard.object(forKey: "showSonnetLabel") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "showSonnetLabel") }
+    }
+    var menuBarTextMode: String {
+        get { UserDefaults.standard.string(forKey: "menuBarTextMode") ?? "off" }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "menuBarTextMode")
+            updateMenuBarTextModeMenu()
+            updateMenuBarText()
+        }
+    }
+
+    // Show Weekly in Menu Bar
+    var showWeeklyItem: NSMenuItem!
+    var weeklyModeItems: [NSMenuItem] = []
+    var cachedWeeklyPct: Int?
+    var showWeeklyMode: String {
+        get { UserDefaults.standard.string(forKey: "showWeeklyMode") ?? "off" }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "showWeeklyMode")
+            updateWeeklyModeMenu()
+            updateMenuBarText()
+        }
+    }
+
+    // Show Sonnet in Menu Bar
+    var showSonnetItem: NSMenuItem!
+    var sonnetModeItems: [NSMenuItem] = []
+    var cachedSonnetPct: Int?
+    var showSonnetMode: String {
+        get { UserDefaults.standard.string(forKey: "showSonnetMode") ?? "off" }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "showSonnetMode")
+            updateSonnetModeMenu()
+            updateMenuBarText()
+        }
     }
 
     // Update checker
@@ -691,11 +732,60 @@ extension AppDelegate {
         settingsItem.submenu = settingsMenu
         menu.addItem(settingsItem)
 
-        // Show Model toggle
-        showModelItem = NSMenuItem(title: "Display model name", action: #selector(toggleShowModel), keyEquivalent: "")
-        showModelItem.target = self
-        showModelItem.state = showModelInMenuBar ? .on : .off
-        menu.addItem(showModelItem)
+        // Menu bar text prefix submenu
+        let menuBarTextMenu = NSMenu()
+        let menuBarTextModes: [(String, String)] = [("Off", "off"), ("Claude", "claude"), ("CC", "cc"), ("Model Name", "model"), ("5 Hour", "5hour")]
+        for (title, mode) in menuBarTextModes {
+            let item = NSMenuItem(title: title, action: #selector(setMenuBarTextMode(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = mode
+            item.state = menuBarTextMode == mode ? .on : .off
+            menuBarTextModeItems.append(item)
+            menuBarTextMenu.addItem(item)
+        }
+        menuBarTextMenu.addItem(NSMenuItem.separator())
+        showWeeklyLabelItem = NSMenuItem(title: "Weekly", action: #selector(toggleWeeklyLabel), keyEquivalent: "")
+        showWeeklyLabelItem.target = self
+        showWeeklyLabelItem.state = showWeeklyLabel ? .on : .off
+        menuBarTextMenu.addItem(showWeeklyLabelItem)
+        showSonnetLabelItem = NSMenuItem(title: "Sonnet", action: #selector(toggleSonnetLabel), keyEquivalent: "")
+        showSonnetLabelItem.target = self
+        showSonnetLabelItem.state = showSonnetLabel ? .on : .off
+        menuBarTextMenu.addItem(showSonnetLabelItem)
+
+        menuBarTextItem = NSMenuItem(title: "Display menu bar text", action: nil, keyEquivalent: "")
+        menuBarTextItem.submenu = menuBarTextMenu
+        menu.addItem(menuBarTextItem)
+
+        // Show Weekly submenu
+        let weeklyMenu = NSMenu()
+        let weeklyModes: [(String, String)] = [("Off", "off"), ("Medium (>50%)", "medium"), ("High (>75%)", "high"), ("Always", "always")]
+        for (title, mode) in weeklyModes {
+            let item = NSMenuItem(title: title, action: #selector(setWeeklyMode(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = mode
+            item.state = showWeeklyMode == mode ? .on : .off
+            weeklyModeItems.append(item)
+            weeklyMenu.addItem(item)
+        }
+        showWeeklyItem = NSMenuItem(title: "Display weekly usage", action: nil, keyEquivalent: "")
+        showWeeklyItem.submenu = weeklyMenu
+        menu.addItem(showWeeklyItem)
+
+        // Show Sonnet submenu
+        let sonnetDisplayMenu = NSMenu()
+        let sonnetModes: [(String, String)] = [("Off", "off"), ("Medium (>50%)", "medium"), ("High (>75%)", "high"), ("Always", "always")]
+        for (title, mode) in sonnetModes {
+            let item = NSMenuItem(title: title, action: #selector(setSonnetMode(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = mode
+            item.state = showSonnetMode == mode ? .on : .off
+            sonnetModeItems.append(item)
+            sonnetDisplayMenu.addItem(item)
+        }
+        showSonnetItem = NSMenuItem(title: "Display sonnet usage", action: nil, keyEquivalent: "")
+        showSonnetItem.submenu = sonnetDisplayMenu
+        menu.addItem(showSonnetItem)
 
         // Notifications submenu
         let notificationsMenu = NSMenu()
@@ -758,6 +848,38 @@ extension AppDelegate {
         let errorItem = NSMenuItem(title: "Test Errors", action: nil, keyEquivalent: "")
         errorItem.submenu = errorMenu
         testMenu.addItem(errorItem)
+
+        let weeklyTestMenu = NSMenu()
+        let testWeeklyValues: [(label: String, pct: Int)] = [
+            ("Medium — 60%", 60),
+            ("High — 85%", 85),
+            ("Always — 25%", 25),
+        ]
+        for (label, pct) in testWeeklyValues {
+            let item = NSMenuItem(title: label, action: #selector(testWeekly(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = pct
+            weeklyTestMenu.addItem(item)
+        }
+        let weeklyTestItem = NSMenuItem(title: "Test Weekly", action: nil, keyEquivalent: "")
+        weeklyTestItem.submenu = weeklyTestMenu
+        testMenu.addItem(weeklyTestItem)
+
+        let sonnetTestMenu = NSMenu()
+        let testSonnetValues: [(label: String, pct: Int)] = [
+            ("Medium — 60%", 60),
+            ("High — 85%", 85),
+            ("Always — 25%", 25),
+        ]
+        for (label, pct) in testSonnetValues {
+            let item = NSMenuItem(title: label, action: #selector(testSonnet(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = pct
+            sonnetTestMenu.addItem(item)
+        }
+        let sonnetTestItem = NSMenuItem(title: "Test Sonnet", action: nil, keyEquivalent: "")
+        sonnetTestItem.submenu = sonnetTestMenu
+        testMenu.addItem(sonnetTestItem)
 
         testMenu.addItem(NSMenuItem.separator())
         let clearItem = NSMenuItem(title: "Clear", action: #selector(clearTestDisplay), keyEquivalent: "")
@@ -950,10 +1072,12 @@ extension AppDelegate {
             let weeklyPct = Int(d.utilization)
             if let prev = previousWeeklyPct, prev > 0, weeklyPct == 0 { sendResetNotification(category: "Weekly") }
             previousWeeklyPct = weeklyPct
+            cachedWeeklyPct = weeklyPct
             let reset = d.resets_at.map { formatReset($0) } ?? "--"
             weeklyItem.title = "Weekly: \(weeklyPct)% (resets \(reset))"
             weeklyItem.attributedTitle = tabbedMenuItemString(left: "Weekly: \(weeklyPct)%", right: "(resets \(reset))")
         } else {
+            cachedWeeklyPct = nil
             weeklyItem.title = "Weekly: --"
             weeklyItem.attributedTitle = nil
         }
@@ -963,10 +1087,12 @@ extension AppDelegate {
             let sonnetPct = Int(s.utilization)
             if let prev = previousSonnetPct, prev > 0, sonnetPct == 0 { sendResetNotification(category: "Sonnet") }
             previousSonnetPct = sonnetPct
+            cachedSonnetPct = sonnetPct
             let reset = s.resets_at.map { formatReset($0) } ?? "--"
             sonnetItem.title = "Sonnet: \(sonnetPct)% (resets \(reset))"
             sonnetItem.attributedTitle = tabbedMenuItemString(left: "Sonnet: \(sonnetPct)%", right: "(resets \(reset))")
         } else {
+            cachedSonnetPct = nil
             sonnetItem.title = "Sonnet: --"
             sonnetItem.attributedTitle = nil
         }
@@ -1009,7 +1135,17 @@ extension AppDelegate {
                 .font: font
             ])
         }
-        // Add outline box around the menu bar text
+        applyMenuBarBorder(color: color)
+    }
+
+    func setMenuBarAttributedText(_ attributedString: NSAttributedString, borderColor: NSColor?) {
+        guard let button = statusItem.button else { return }
+        button.attributedTitle = attributedString
+        applyMenuBarBorder(color: borderColor)
+    }
+
+    private func applyMenuBarBorder(color: NSColor?) {
+        guard let button = statusItem.button else { return }
         button.wantsLayer = true
         if let layer = button.layer {
             let borderColor = color ?? NSColor.labelColor
@@ -1058,17 +1194,81 @@ extension AppDelegate {
             return
         }
         guard let pct = fiveHourPct else { return }
-        let prefix = (showModelInMenuBar ? activeModelName.map { "\($0): " } : nil) ?? ""
+        let prefix: String
+        switch menuBarTextMode {
+        case "claude": prefix = "Claude: "
+        case "cc":     prefix = "CC: "
+        case "model":  prefix = activeModelName.map { "\($0): " } ?? ""
+        case "5hour":  prefix = "5 Hour: "
+        default:       prefix = ""
+        }
         let showIcon = dynamicRefreshEnabled && (dynamicStatusIcon != "↻" || showDynamicIcon)
         let suffix = showIcon ? " \(dynamicStatusIcon)" : ""
         var (text, color) = generateMenuBarText(pct: pct, resetString: fiveHourResetString, prefix: prefix, suffix: suffix)
 
-        // Stale data indicator
-        if let lastFetch = lastSuccessfulFetch, Date().timeIntervalSince(lastFetch) > refreshInterval * 2 {
-            text += " (stale)"
+        // Determine if weekly should be shown
+        var weeklyPctValue: Int?
+        if let weeklyPct = cachedWeeklyPct {
+            switch showWeeklyMode {
+            case "always": weeklyPctValue = weeklyPct
+            case "high" where weeklyPct > 75: weeklyPctValue = weeklyPct
+            case "medium" where weeklyPct > 50: weeklyPctValue = weeklyPct
+            default: break
+            }
         }
 
-        setMenuBarText(text, color: color)
+        // Determine if sonnet should be shown
+        var sonnetPctValue: Int?
+        if let sonnetPct = cachedSonnetPct {
+            switch showSonnetMode {
+            case "always": sonnetPctValue = sonnetPct
+            case "high" where sonnetPct > 75: sonnetPctValue = sonnetPct
+            case "medium" where sonnetPct > 50: sonnetPctValue = sonnetPct
+            default: break
+            }
+        }
+
+        // Stale data indicator
+        var staleText = ""
+        if let lastFetch = lastSuccessfulFetch, Date().timeIntervalSince(lastFetch) > refreshInterval * 2 {
+            staleText = " (stale)"
+        }
+
+        // Build attributed string with per-section colors when extra sections are shown
+        if weeklyPctValue != nil || sonnetPctValue != nil {
+            let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+            let result = NSMutableAttributedString()
+            result.append(NSAttributedString(string: text, attributes: [
+                .foregroundColor: color,
+                .font: font
+            ]))
+            if let weeklyPct = weeklyPctValue {
+                let weeklyColor = colorForPercentage(weeklyPct)
+                let weeklyText = showWeeklyLabel ? " | weekly: \(weeklyPct)%" : " | \(weeklyPct)%"
+                result.append(NSAttributedString(string: weeklyText, attributes: [
+                    .foregroundColor: weeklyColor,
+                    .font: font
+                ]))
+            }
+            if let sonnetPct = sonnetPctValue {
+                let sonnetColor = colorForPercentage(sonnetPct)
+                let sonnetText = showSonnetLabel ? " | sonnet: \(sonnetPct)%" : " | \(sonnetPct)%"
+                result.append(NSAttributedString(string: sonnetText, attributes: [
+                    .foregroundColor: sonnetColor,
+                    .font: font
+                ]))
+            }
+            if !staleText.isEmpty {
+                result.append(NSAttributedString(string: staleText, attributes: [
+                    .foregroundColor: color,
+                    .font: font
+                ]))
+            }
+            setMenuBarAttributedText(result, borderColor: color)
+        } else {
+            text += staleText
+            setMenuBarText(text, color: color)
+        }
     }
 
     func showError(_ error: UsageError) {
@@ -1092,6 +1292,8 @@ extension AppDelegate {
         if !testModeActive {
             fiveHourPct = nil
             fiveHourResetString = nil
+            cachedWeeklyPct = nil
+            cachedSonnetPct = nil
             fiveHourItem.title = "5-hour: --"
             fiveHourItem.attributedTitle = nil
             weeklyItem.title = "Weekly: --"
@@ -1165,10 +1367,52 @@ extension AppDelegate {
         }
     }
 
-    @objc func toggleShowModel() {
-        showModelInMenuBar.toggle()
-        showModelItem.state = showModelInMenuBar ? .on : .off
+    @objc func setMenuBarTextMode(_ sender: NSMenuItem) {
+        if let mode = sender.representedObject as? String {
+            menuBarTextMode = mode
+        }
+    }
+
+    func updateMenuBarTextModeMenu() {
+        for item in menuBarTextModeItems {
+            item.state = (item.representedObject as? String) == menuBarTextMode ? .on : .off
+        }
+    }
+
+    @objc func toggleWeeklyLabel() {
+        showWeeklyLabel.toggle()
+        showWeeklyLabelItem.state = showWeeklyLabel ? .on : .off
         updateMenuBarText()
+    }
+
+    @objc func setWeeklyMode(_ sender: NSMenuItem) {
+        if let mode = sender.representedObject as? String {
+            showWeeklyMode = mode
+        }
+    }
+
+    func updateWeeklyModeMenu() {
+        for item in weeklyModeItems {
+            item.state = (item.representedObject as? String) == showWeeklyMode ? .on : .off
+        }
+    }
+
+    @objc func toggleSonnetLabel() {
+        showSonnetLabel.toggle()
+        showSonnetLabelItem.state = showSonnetLabel ? .on : .off
+        updateMenuBarText()
+    }
+
+    @objc func setSonnetMode(_ sender: NSMenuItem) {
+        if let mode = sender.representedObject as? String {
+            showSonnetMode = mode
+        }
+    }
+
+    func updateSonnetModeMenu() {
+        for item in sonnetModeItems {
+            item.state = (item.representedObject as? String) == showSonnetMode ? .on : .off
+        }
     }
 
     @objc func openDashboard() {
@@ -1215,6 +1459,61 @@ extension AppDelegate {
 
         let (text, color) = generateMenuBarText(pct: pct, resetString: resetStr, prefix: "TEST: ")
         setMenuBarText(text, color: color)
+    }
+
+    @objc func testWeekly(_ sender: NSMenuItem) {
+        testModeActive = true
+        let weeklyPct = sender.tag
+
+        // Use current 5-hour data or a sensible default
+        let pct = fiveHourPct ?? 45
+        var resetStr = fiveHourResetString
+        if resetStr == nil {
+            resetStr = ISO8601DateFormatter().string(from: Date().addingTimeInterval(2 * 3600 + 37 * 60))
+        }
+
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        let (text, color) = generateMenuBarText(pct: pct, resetString: resetStr, prefix: "TEST: ")
+        let weeklyColor = colorForPercentage(weeklyPct)
+
+        let result = NSMutableAttributedString()
+        result.append(NSAttributedString(string: text, attributes: [
+            .foregroundColor: color,
+            .font: font
+        ]))
+        let weeklyText = showWeeklyLabel ? " | weekly: \(weeklyPct)%" : " | \(weeklyPct)%"
+        result.append(NSAttributedString(string: weeklyText, attributes: [
+            .foregroundColor: weeklyColor,
+            .font: font
+        ]))
+        setMenuBarAttributedText(result, borderColor: color)
+    }
+
+    @objc func testSonnet(_ sender: NSMenuItem) {
+        testModeActive = true
+        let sonnetPct = sender.tag
+
+        let pct = fiveHourPct ?? 45
+        var resetStr = fiveHourResetString
+        if resetStr == nil {
+            resetStr = ISO8601DateFormatter().string(from: Date().addingTimeInterval(2 * 3600 + 37 * 60))
+        }
+
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        let (text, color) = generateMenuBarText(pct: pct, resetString: resetStr, prefix: "TEST: ")
+        let sonnetColor = colorForPercentage(sonnetPct)
+
+        let result = NSMutableAttributedString()
+        result.append(NSAttributedString(string: text, attributes: [
+            .foregroundColor: color,
+            .font: font
+        ]))
+        let sonnetText = showSonnetLabel ? " | sonnet: \(sonnetPct)%" : " | \(sonnetPct)%"
+        result.append(NSAttributedString(string: sonnetText, attributes: [
+            .foregroundColor: sonnetColor,
+            .font: font
+        ]))
+        setMenuBarAttributedText(result, borderColor: color)
     }
 
     @objc func testError(_ sender: NSMenuItem) {
