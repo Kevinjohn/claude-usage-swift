@@ -4,7 +4,7 @@ import UserNotifications
 
 // MARK: - Version
 
-private let appVersion = "2.5.2"
+private let appVersion = "2.5.3"
 
 // MARK: - Usage API
 
@@ -709,6 +709,8 @@ extension AppDelegate {
 
         // Test values derived from DisplayThresholds so they stay in sync
         let testMenu = NSMenu()
+
+        let thresholdMenu = NSMenu()
         let t = DisplayThresholds.self
         let testRanges: [(label: String, pct: Int)] = [
             ("0–\(t.colorGreen - 1)%",  t.colorGreen / 2),
@@ -721,9 +723,11 @@ extension AppDelegate {
             let item = NSMenuItem(title: label, action: #selector(testPercentage(_:)), keyEquivalent: "")
             item.target = self
             item.tag = pct
-            testMenu.addItem(item)
+            thresholdMenu.addItem(item)
         }
-        testMenu.addItem(NSMenuItem.separator())
+        let thresholdItem = NSMenuItem(title: "Test Thresholds", action: nil, keyEquivalent: "")
+        thresholdItem.submenu = thresholdMenu
+        testMenu.addItem(thresholdItem)
 
         let errorMenu = NSMenu()
         let testErrors: [(label: String, tag: Int)] = [
@@ -1059,7 +1063,8 @@ extension AppDelegate {
     func showError(_ error: UsageError) {
         fiveHourPct = nil
         fiveHourResetString = nil
-        setMenuBarText(error.menuBarText)
+        let barText = testModeActive ? "TEST: \(error.menuBarText)" : error.menuBarText
+        setMenuBarText(barText)
 
         var lines = [error.description]
         if let hint = error.hint {

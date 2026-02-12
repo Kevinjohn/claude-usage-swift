@@ -59,7 +59,7 @@ Key design decisions:
 - Stale data indicator: appends "(stale)" to menu bar text when last successful fetch was > 2x refresh interval ago
 - Usage rate tracking: snapshots stored in UserDefaults, pruned to 6h / 100 entries, cleared on reset cycle change
 - Reset notifications: macOS notifications when any category drops from >0% to 0%, toggled via "Notifications > Reset to 0%" submenu (default on)
-- Test Display submenu lets you preview color thresholds at 10/40/75/85/95% and simulate all error states (keychain, network, auth, rate-limit, server, decoding) via a "Test Errors" nested submenu
+- Test Display submenu contains "Test Thresholds" (preview color thresholds at 10/40/75/85/95%) and "Test Errors" (simulate keychain, network, auth, rate-limit, server, decoding errors) nested submenus; both prepend "TEST: " to the menu bar text while active
 - "Display model name" toggle prepends active model to menu bar text (e.g. `opus: 45%`), persisted via UserDefaults
 - Launch at Login via SMAppService (macOS 13+)
 - Menu bar uses 11pt monospaced-digit system font for compact, aligned display, wrapped in a subtle 1px rounded outline box (50% opacity, 4pt corner radius) for visual distinction
