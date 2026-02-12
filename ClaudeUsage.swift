@@ -4,7 +4,7 @@ import UserNotifications
 
 // MARK: - Version
 
-private let appVersion = "2.6.1"
+private let appVersion = "2.6.2"
 
 // MARK: - Usage API
 
@@ -687,20 +687,8 @@ extension AppDelegate {
         menu.addItem(NSMenuItem.separator())
         menu.addItem(updatedItem)
         menu.addItem(NSMenuItem(title: "Refresh", action: #selector(refresh), keyEquivalent: "r"))
-        menu.addItem(NSMenuItem.separator())
 
-        // Action items
-        let dashboardItem = NSMenuItem(title: "Open Dashboard", action: #selector(openDashboard), keyEquivalent: "d")
-        dashboardItem.target = self
-        menu.addItem(dashboardItem)
-
-        let copyItem = NSMenuItem(title: "Copy Usage", action: #selector(copyUsage), keyEquivalent: "c")
-        copyItem.target = self
-        menu.addItem(copyItem)
-
-        menu.addItem(NSMenuItem.separator())
-
-        // Settings submenu
+        // Refresh interval submenu
         let settingsMenu = NSMenu()
         let intervals: [(String, Int)] = [
             ("Every 1 minute", 60),
@@ -731,6 +719,19 @@ extension AppDelegate {
         let settingsItem = NSMenuItem(title: "Refresh Interval", action: nil, keyEquivalent: "")
         settingsItem.submenu = settingsMenu
         menu.addItem(settingsItem)
+
+        menu.addItem(NSMenuItem.separator())
+
+        // Action items
+        let dashboardItem = NSMenuItem(title: "Open Dashboard", action: #selector(openDashboard), keyEquivalent: "d")
+        dashboardItem.target = self
+        menu.addItem(dashboardItem)
+
+        let copyItem = NSMenuItem(title: "Copy Usage", action: #selector(copyUsage), keyEquivalent: "c")
+        copyItem.target = self
+        menu.addItem(copyItem)
+
+        menu.addItem(NSMenuItem.separator())
 
         // Menu bar text prefix submenu
         let menuBarTextMenu = NSMenu()
@@ -809,25 +810,6 @@ extension AppDelegate {
         // Test values derived from DisplayThresholds so they stay in sync
         let testMenu = NSMenu()
 
-        let thresholdMenu = NSMenu()
-        let t = DisplayThresholds.self
-        let testRanges: [(label: String, pct: Int)] = [
-            ("0–\(t.colorGreen - 1)%",  t.colorGreen / 2),
-            ("\(t.colorGreen)–\(t.colorYellow - 1)%", (t.colorGreen + t.colorYellow) / 2),
-            ("\(t.colorYellow)–\(t.colorOrange - 1)%", (t.colorYellow + t.colorOrange) / 2),
-            ("\(t.colorOrange)–\(t.colorRed - 1)%", (t.colorOrange + t.colorRed) / 2),
-            ("\(t.colorRed)–100%", (t.colorRed + 100) / 2),
-        ]
-        for (label, pct) in testRanges {
-            let item = NSMenuItem(title: label, action: #selector(testPercentage(_:)), keyEquivalent: "")
-            item.target = self
-            item.tag = pct
-            thresholdMenu.addItem(item)
-        }
-        let thresholdItem = NSMenuItem(title: "Test Thresholds", action: nil, keyEquivalent: "")
-        thresholdItem.submenu = thresholdMenu
-        testMenu.addItem(thresholdItem)
-
         let errorMenu = NSMenu()
         let testErrors: [(label: String, tag: Int)] = [
             ("Keychain not found", 0),
@@ -848,6 +830,25 @@ extension AppDelegate {
         let errorItem = NSMenuItem(title: "Test Errors", action: nil, keyEquivalent: "")
         errorItem.submenu = errorMenu
         testMenu.addItem(errorItem)
+
+        let thresholdMenu = NSMenu()
+        let t = DisplayThresholds.self
+        let testRanges: [(label: String, pct: Int)] = [
+            ("0–\(t.colorGreen - 1)%",  t.colorGreen / 2),
+            ("\(t.colorGreen)–\(t.colorYellow - 1)%", (t.colorGreen + t.colorYellow) / 2),
+            ("\(t.colorYellow)–\(t.colorOrange - 1)%", (t.colorYellow + t.colorOrange) / 2),
+            ("\(t.colorOrange)–\(t.colorRed - 1)%", (t.colorOrange + t.colorRed) / 2),
+            ("\(t.colorRed)–100%", (t.colorRed + 100) / 2),
+        ]
+        for (label, pct) in testRanges {
+            let item = NSMenuItem(title: label, action: #selector(testPercentage(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = pct
+            thresholdMenu.addItem(item)
+        }
+        let thresholdItem = NSMenuItem(title: "Test 5 Hours", action: nil, keyEquivalent: "")
+        thresholdItem.submenu = thresholdMenu
+        testMenu.addItem(thresholdItem)
 
         let weeklyTestMenu = NSMenu()
         let testWeeklyValues: [(label: String, pct: Int)] = [
