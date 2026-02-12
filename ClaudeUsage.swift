@@ -4,7 +4,7 @@ import UserNotifications
 
 // MARK: - Version
 
-private let appVersion = "2.4.1"
+private let appVersion = "2.5.0"
 
 // MARK: - Usage API
 
@@ -88,10 +88,23 @@ enum UsageError: Error, CustomStringConvertible {
             return "Could not parse OAuth token from Keychain"
         case .networkError(let error):
             return "Network error: \(error.localizedDescription)"
+        case .httpError(let code) where code == 401 || code == 403:
+            return "HTTP \(code) — token expired or invalid"
         case .httpError(let code):
             return "HTTP \(code) from Anthropic API"
         case .decodingError(let error):
             return "Could not decode API response: \(error.localizedDescription)"
+        }
+    }
+
+    var hint: String? {
+        switch self {
+        case .httpError(let code) where code == 401 || code == 403:
+            return "Try: log in at console.anthropic.com, or\nstart Claude Code to refresh your token"
+        case .keychainNotFound:
+            return "Try: open Claude Code and log in"
+        default:
+            return nil
         }
     }
 }
@@ -402,6 +415,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Menu items
     var headerItem: NSMenuItem!
+    var errorHintSeparator: NSMenuItem!
+    var errorHintItem: NSMenuItem!
     var fiveHourItem: NSMenuItem!
     var weeklyItem: NSMenuItem!
     var sonnetItem: NSMenuItem!
@@ -588,7 +603,16 @@ extension AppDelegate {
         rateItem.isHidden = true
         updatedItem = NSMenuItem(title: "Updated: --", action: nil, keyEquivalent: "")
 
+        errorHintSeparator = NSMenuItem.separator()
+        errorHintSeparator.isHidden = true
+
+        errorHintItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        errorHintItem.isEnabled = false
+        errorHintItem.isHidden = true
+
         menu.addItem(headerItem)
+        menu.addItem(errorHintSeparator)
+        menu.addItem(errorHintItem)
         menu.addItem(NSMenuItem.separator())
         menu.addItem(fiveHourItem)
         menu.addItem(rateItem)
@@ -823,6 +847,9 @@ extension AppDelegate {
     }
 
     func updateUI(usage: UsageResponse) {
+        errorHintItem.isHidden = true
+        errorHintSeparator.isHidden = true
+
         // 5-hour
         if let h = usage.five_hour {
             let pct = Int(h.utilization)
@@ -879,6 +906,7 @@ extension AppDelegate {
         }
 
         // Sonnet
+        sonnetItem.isHidden = false
         if let s = usage.seven_day_sonnet {
             let sonnetPct = Int(s.utilization)
             if let prev = previousSonnetPct, prev > 0, sonnetPct == 0 { sendResetNotification(category: "Sonnet") }
@@ -995,11 +1023,23 @@ extension AppDelegate {
         fiveHourPct = nil
         fiveHourResetString = nil
         setMenuBarText(error.menuBarText)
-        fiveHourItem.title = "5-hour: \(error.description)"
+
+        if let hint = error.hint {
+            errorHintItem.title = "\(error.description)\n\(hint)"
+            errorHintItem.isHidden = false
+            errorHintSeparator.isHidden = false
+        } else {
+            errorHintItem.title = error.description
+            errorHintItem.isHidden = false
+            errorHintSeparator.isHidden = false
+        }
+
+        fiveHourItem.title = "5-hour: --"
         fiveHourItem.attributedTitle = nil
         weeklyItem.title = "Weekly: --"
         weeklyItem.attributedTitle = nil
         sonnetItem.title = "Sonnet: --"
+        sonnetItem.isHidden = false
         sonnetItem.attributedTitle = nil
         extraItem.title = "Extra: --"
         extraItem.attributedTitle = nil
