@@ -4,7 +4,7 @@ import UserNotifications
 
 // MARK: - Version
 
-private let appVersion = "2.5.3"
+private let appVersion = "2.5.4"
 
 // MARK: - Usage API
 
@@ -78,6 +78,13 @@ enum UsageError: Error, CustomStringConvertible {
         case .httpError(let code) where code == 429: return "rate limit?"
         case .httpError: return "http?"
         case .decodingError: return "json?"
+        }
+    }
+
+    var menuBarColor: NSColor {
+        switch self {
+        case .httpError(let code) where code == 429: return .systemRed
+        default: return .systemYellow
         }
     }
 
@@ -1061,10 +1068,8 @@ extension AppDelegate {
     }
 
     func showError(_ error: UsageError) {
-        fiveHourPct = nil
-        fiveHourResetString = nil
         let barText = testModeActive ? "TEST: \(error.menuBarText)" : error.menuBarText
-        setMenuBarText(barText)
+        setMenuBarText(barText, color: error.menuBarColor)
 
         var lines = [error.description]
         if let hint = error.hint {
@@ -1080,19 +1085,23 @@ extension AppDelegate {
         }
         errorHintSeparator.isHidden = false
 
-        fiveHourItem.title = "5-hour: --"
-        fiveHourItem.attributedTitle = nil
-        weeklyItem.title = "Weekly: --"
-        weeklyItem.attributedTitle = nil
-        sonnetItem.title = "Sonnet: --"
-        sonnetItem.isHidden = false
-        sonnetItem.attributedTitle = nil
-        extraItem.title = "Extra: --"
-        extraItem.attributedTitle = nil
-        rateItem.isHidden = true
+        if !testModeActive {
+            fiveHourPct = nil
+            fiveHourResetString = nil
+            fiveHourItem.title = "5-hour: --"
+            fiveHourItem.attributedTitle = nil
+            weeklyItem.title = "Weekly: --"
+            weeklyItem.attributedTitle = nil
+            sonnetItem.title = "Sonnet: --"
+            sonnetItem.isHidden = false
+            sonnetItem.attributedTitle = nil
+            extraItem.title = "Extra: --"
+            extraItem.attributedTitle = nil
+            rateItem.isHidden = true
 
-        lastUpdateTime = Date()
-        updateRelativeTime()
+            lastUpdateTime = Date()
+            updateRelativeTime()
+        }
     }
 
     func updateRelativeTime() {
