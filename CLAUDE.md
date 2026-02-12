@@ -29,7 +29,7 @@ Everything lives in `ClaudeUsage.swift` (~1000 lines), organized as:
 - **Data models** (top): `UsageResponse`, `UsageLimit`, `ExtraUsage` — Codable structs matching the Anthropic OAuth usage API response; `UsageSnapshot` for tracking usage history
 - **`DisplayThresholds` struct**: centralised static config for color breakpoints (30/61/81/91%) and countdown detail thresholds (30/61%)
 - **Ephemeral URLSession**: module-level `urlSession` using `URLSessionConfiguration.ephemeral` to prevent disk caching of API responses
-- **`UsageError` enum**: structured error type with cases `keychainNotFound`, `keychainParseFailure`, `networkError`, `httpError`, `decodingError` — each provides a `menuBarText` (e.g. `"key?"`, `"net?"`, `"auth?"`) and a `description` for the dropdown menu; `hint` property returns optional actionable guidance for recoverable errors (auth 401/403, keychain not found)
+- **`UsageError` enum**: structured error type with cases `keychainNotFound`, `keychainParseFailure`, `networkError`, `httpError`, `decodingError` — each provides a `menuBarText` (e.g. `"key?"`, `"network?"`, `"auth?"`, `"rate limit?"`) and a `description` for the dropdown menu; `hint` property returns actionable guidance for every error type, rendered as separate menu items for multiline readability
 - **Cached date formatters**: module-level `iso8601FractionalFormatter`, `iso8601Formatter`, `dateOnlyFormatter` — avoids repeated allocation of expensive formatters
 - **Shared date parser**: `parseISO8601()` handles both fractional-seconds and plain ISO8601 formats using cached formatters
 - **Networking (async)**: `getOAuthToken()` runs `/usr/bin/security` on a background queue via `withCheckedThrowingContinuation` to avoid blocking the main thread; `fetchUsage()` uses `urlSession.data(for:)` — both throw `UsageError`
@@ -45,7 +45,7 @@ Everything lives in `ClaudeUsage.swift` (~1000 lines), organized as:
   - **Refresh & Timer**: `updateIntervalMenu()`, `restartTimer()` (includes 10% timer tolerance for power efficiency), `adjustDynamicInterval(newPct:)` (core dynamic refresh logic: steps down on usage increase, steps up after 2 unchanged cycles), `updateDynamicStatusItem()`, `toggleDynamicRefresh()`, `setInterval(_:)`, `refresh()`, `updateUI(usage:)`
   - **Display**: `setMenuBarText(_:color:)` (11pt monospaced-digit font; adds a 1px rounded outline box around the menu bar text using the button's CALayer, with 50% opacity border color matching the usage color and 4pt corner radius), `tabbedMenuItemString(left:right:)` (creates `NSAttributedString` with left-aligned tab stop for column-aligned reset times in dropdown), `generateMenuBarText(pct:resetString:prefix:suffix:)` (shared by `updateMenuBarText()` and `testPercentage()`), `updateMenuBarText()`, `showError(_:)` (displays error hint section with actionable guidance when available), `updateRelativeTime()`
   - **Alerts**: `sendResetNotification(category:)` fires a macOS notification when a usage category resets to 0%; `toggleResetNotifications()` toggles the "Notifications > Reset to 0%" menu item
-  - **User Actions**: `updateHeaderFromCache()`, `openReleasesPage()`, `toggleShowModel()`, `openDashboard()`, `copyUsage()`, `toggleLaunchAtLogin()`, `testPercentage(_:)`, `clearTestDisplay()`, `quit()`
+  - **User Actions**: `updateHeaderFromCache()`, `openReleasesPage()`, `toggleShowModel()`, `openDashboard()`, `copyUsage()`, `toggleLaunchAtLogin()`, `testPercentage(_:)`, `testError(_:)`, `clearTestDisplay()`, `quit()`
   - `effectiveInterval` — computed property returning `refreshInterval` when dynamic is off, or the current tier interval when on
   - `effectiveDynamicLadder` — filters `dynamicRefreshLadder` to tiers strictly less than `refreshInterval`; at idle the timer uses the user's base interval
   - `showDynamicIcon` — UserDefaults-backed toggle (default off) controlling whether the idle `↻` icon appears in the menu bar; `↑`/`↓` arrows always display regardless
@@ -59,7 +59,7 @@ Key design decisions:
 - Stale data indicator: appends "(stale)" to menu bar text when last successful fetch was > 2x refresh interval ago
 - Usage rate tracking: snapshots stored in UserDefaults, pruned to 6h / 100 entries, cleared on reset cycle change
 - Reset notifications: macOS notifications when any category drops from >0% to 0%, toggled via "Notifications > Reset to 0%" submenu (default on)
-- Test Display submenu lets you preview color thresholds at 10/40/75/85/95%
+- Test Display submenu lets you preview color thresholds at 10/40/75/85/95% and simulate all error states (keychain, network, auth, rate-limit, server, decoding) via a "Test Errors" nested submenu
 - "Display model name" toggle prepends active model to menu bar text (e.g. `opus: 45%`), persisted via UserDefaults
 - Launch at Login via SMAppService (macOS 13+)
 - Menu bar uses 11pt monospaced-digit system font for compact, aligned display, wrapped in a subtle 1px rounded outline box (50% opacity, 4pt corner radius) for visual distinction

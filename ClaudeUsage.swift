@@ -4,7 +4,7 @@ import UserNotifications
 
 // MARK: - Version
 
-private let appVersion = "2.5.1"
+private let appVersion = "2.5.2"
 
 // MARK: - Usage API
 
@@ -73,8 +73,9 @@ enum UsageError: Error, CustomStringConvertible {
         switch self {
         case .keychainNotFound: return "key?"
         case .keychainParseFailure: return "key?"
-        case .networkError: return "net?"
+        case .networkError: return "network?"
         case .httpError(let code) where code == 401 || code == 403: return "auth?"
+        case .httpError(let code) where code == 429: return "rate limit?"
         case .httpError: return "http?"
         case .decodingError: return "json?"
         }
@@ -426,7 +427,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Menu items
     var headerItem: NSMenuItem!
     var errorHintSeparator: NSMenuItem!
-    var errorHintItem: NSMenuItem!
+    var errorHintItems: [NSMenuItem] = []
     var fiveHourItem: NSMenuItem!
     var weeklyItem: NSMenuItem!
     var sonnetItem: NSMenuItem!
@@ -616,13 +617,16 @@ extension AppDelegate {
         errorHintSeparator = NSMenuItem.separator()
         errorHintSeparator.isHidden = true
 
-        errorHintItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-        errorHintItem.isEnabled = false
-        errorHintItem.isHidden = true
+        errorHintItems = (0..<4).map { _ in
+            let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            item.isHidden = true
+            return item
+        }
 
         menu.addItem(headerItem)
         menu.addItem(errorHintSeparator)
-        menu.addItem(errorHintItem)
+        for item in errorHintItems { menu.addItem(item) }
         menu.addItem(NSMenuItem.separator())
         menu.addItem(fiveHourItem)
         menu.addItem(rateItem)
@@ -719,6 +723,29 @@ extension AppDelegate {
             item.tag = pct
             testMenu.addItem(item)
         }
+        testMenu.addItem(NSMenuItem.separator())
+
+        let errorMenu = NSMenu()
+        let testErrors: [(label: String, tag: Int)] = [
+            ("Keychain not found", 0),
+            ("Keychain parse failure", 1),
+            ("Network error", 2),
+            ("HTTP 401 (auth)", 3),
+            ("HTTP 429 (rate limit)", 4),
+            ("HTTP 500 (server)", 5),
+            ("HTTP 418 (other)", 6),
+            ("Decoding error", 7),
+        ]
+        for (label, tag) in testErrors {
+            let item = NSMenuItem(title: label, action: #selector(testError(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = tag
+            errorMenu.addItem(item)
+        }
+        let errorItem = NSMenuItem(title: "Test Errors", action: nil, keyEquivalent: "")
+        errorItem.submenu = errorMenu
+        testMenu.addItem(errorItem)
+
         testMenu.addItem(NSMenuItem.separator())
         let clearItem = NSMenuItem(title: "Clear", action: #selector(clearTestDisplay), keyEquivalent: "")
         clearItem.target = self
@@ -857,7 +884,7 @@ extension AppDelegate {
     }
 
     func updateUI(usage: UsageResponse) {
-        errorHintItem.isHidden = true
+        for item in errorHintItems { item.isHidden = true }
         errorHintSeparator.isHidden = true
 
         // 5-hour
@@ -1034,15 +1061,19 @@ extension AppDelegate {
         fiveHourResetString = nil
         setMenuBarText(error.menuBarText)
 
+        var lines = [error.description]
         if let hint = error.hint {
-            errorHintItem.title = "\(error.description)\n\(hint)"
-            errorHintItem.isHidden = false
-            errorHintSeparator.isHidden = false
-        } else {
-            errorHintItem.title = error.description
-            errorHintItem.isHidden = false
-            errorHintSeparator.isHidden = false
+            lines += hint.components(separatedBy: "\n")
         }
+        for (i, item) in errorHintItems.enumerated() {
+            if i < lines.count {
+                item.title = lines[i]
+                item.isHidden = false
+            } else {
+                item.isHidden = true
+            }
+        }
+        errorHintSeparator.isHidden = false
 
         fiveHourItem.title = "5-hour: --"
         fiveHourItem.attributedTitle = nil
@@ -1169,9 +1200,33 @@ extension AppDelegate {
         setMenuBarText(text, color: color)
     }
 
+    @objc func testError(_ sender: NSMenuItem) {
+        testModeActive = true
+        let dummyError: Error = NSError(domain: "test", code: 0, userInfo: [NSLocalizedDescriptionKey: "simulated error"])
+        let error: UsageError
+        switch sender.tag {
+        case 0: error = .keychainNotFound
+        case 1: error = .keychainParseFailure
+        case 2: error = .networkError(dummyError)
+        case 3: error = .httpError(401)
+        case 4: error = .httpError(429)
+        case 5: error = .httpError(500)
+        case 6: error = .httpError(418)
+        case 7: error = .decodingError(dummyError)
+        default: return
+        }
+        showError(error)
+    }
+
     @objc func clearTestDisplay() {
         testModeActive = false
-        updateMenuBarText()
+        for item in errorHintItems { item.isHidden = true }
+        errorHintSeparator.isHidden = true
+        if fiveHourPct != nil {
+            updateMenuBarText()
+        } else {
+            refresh()
+        }
     }
 
     @objc func quit() {
