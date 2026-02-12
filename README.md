@@ -42,7 +42,7 @@ A native macOS menu bar app that shows your Claude API usage, reset countdowns, 
 - Dynamic refresh — adaptive polling that speeds up when usage is climbing and slows back down when stable, with status icons in the menu bar (`↑` increasing, `↓` cooling down)
 - Launch at Login (macOS 13+, via SMAppService)
 - Display menu bar text — prefix options: Off, Claude, CC, Model Name, 5 Hour
-- Display weekly/sonnet usage — show in menu bar with threshold modes: Off, Medium (>50%), High (>75%), Always
+- Display weekly/sonnet usage — show in menu bar with threshold modes: Off, Low (>30%), Medium (>60%), High (>80%), Always
 - Label toggles — show or hide `weekly:` / `sonnet:` label text in the menu bar
 
 **Utilities**

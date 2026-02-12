@@ -4,7 +4,7 @@ import UserNotifications
 
 // MARK: - Version
 
-private let appVersion = "2.6.0"
+private let appVersion = "2.6.1"
 
 // MARK: - Usage API
 
@@ -759,7 +759,7 @@ extension AppDelegate {
 
         // Show Weekly submenu
         let weeklyMenu = NSMenu()
-        let weeklyModes: [(String, String)] = [("Off", "off"), ("Medium (>50%)", "medium"), ("High (>75%)", "high"), ("Always", "always")]
+        let weeklyModes: [(String, String)] = [("Off", "off"), ("Low (>30%)", "low"), ("Medium (>60%)", "medium"), ("High (>80%)", "high"), ("Always", "always")]
         for (title, mode) in weeklyModes {
             let item = NSMenuItem(title: title, action: #selector(setWeeklyMode(_:)), keyEquivalent: "")
             item.target = self
@@ -774,7 +774,7 @@ extension AppDelegate {
 
         // Show Sonnet submenu
         let sonnetDisplayMenu = NSMenu()
-        let sonnetModes: [(String, String)] = [("Off", "off"), ("Medium (>50%)", "medium"), ("High (>75%)", "high"), ("Always", "always")]
+        let sonnetModes: [(String, String)] = [("Off", "off"), ("Low (>30%)", "low"), ("Medium (>60%)", "medium"), ("High (>80%)", "high"), ("Always", "always")]
         for (title, mode) in sonnetModes {
             let item = NSMenuItem(title: title, action: #selector(setSonnetMode(_:)), keyEquivalent: "")
             item.target = self
@@ -851,8 +851,9 @@ extension AppDelegate {
 
         let weeklyTestMenu = NSMenu()
         let testWeeklyValues: [(label: String, pct: Int)] = [
-            ("Medium — 60%", 60),
-            ("High — 85%", 85),
+            ("Low — 40%", 40),
+            ("Medium — 70%", 70),
+            ("High — 95%", 95),
             ("Always — 25%", 25),
         ]
         for (label, pct) in testWeeklyValues {
@@ -867,8 +868,9 @@ extension AppDelegate {
 
         let sonnetTestMenu = NSMenu()
         let testSonnetValues: [(label: String, pct: Int)] = [
-            ("Medium — 60%", 60),
-            ("High — 85%", 85),
+            ("Low — 40%", 40),
+            ("Medium — 70%", 70),
+            ("High — 95%", 95),
             ("Always — 25%", 25),
         ]
         for (label, pct) in testSonnetValues {
@@ -1211,8 +1213,9 @@ extension AppDelegate {
         if let weeklyPct = cachedWeeklyPct {
             switch showWeeklyMode {
             case "always": weeklyPctValue = weeklyPct
-            case "high" where weeklyPct > 75: weeklyPctValue = weeklyPct
-            case "medium" where weeklyPct > 50: weeklyPctValue = weeklyPct
+            case "high" where weeklyPct > 80: weeklyPctValue = weeklyPct
+            case "medium" where weeklyPct > 60: weeklyPctValue = weeklyPct
+            case "low" where weeklyPct > 30: weeklyPctValue = weeklyPct
             default: break
             }
         }
@@ -1222,8 +1225,9 @@ extension AppDelegate {
         if let sonnetPct = cachedSonnetPct {
             switch showSonnetMode {
             case "always": sonnetPctValue = sonnetPct
-            case "high" where sonnetPct > 75: sonnetPctValue = sonnetPct
-            case "medium" where sonnetPct > 50: sonnetPctValue = sonnetPct
+            case "high" where sonnetPct > 80: sonnetPctValue = sonnetPct
+            case "medium" where sonnetPct > 60: sonnetPctValue = sonnetPct
+            case "low" where sonnetPct > 30: sonnetPctValue = sonnetPct
             default: break
             }
         }
