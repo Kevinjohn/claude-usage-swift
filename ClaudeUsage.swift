@@ -4,7 +4,7 @@ import UserNotifications
 
 // MARK: - Version
 
-private let appVersion = "2.6.3"
+private let appVersion = "2.6.4"
 
 // MARK: - Usage API
 
@@ -522,6 +522,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Dynamic refresh
     var dynamicRefreshItem: NSMenuItem!
     var dynamicStatusItem: NSMenuItem!
+    var lastCheckedItem: NSMenuItem!
     var dynamicTierIndex: Int = 0
     var dynamicPreviousPct: Int? = nil
     var dynamicUnchangedCount: Int = 0
@@ -604,7 +605,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         updateHeaderFromCache()
         Task {
             await checkForUpdate()
-            await MainActor.run { self.updateHeaderFromCache() }
+            await MainActor.run {
+                self.updateHeaderFromCache()
+                self.updateLastCheckedItem()
+            }
         }
 
         // Start timer
@@ -618,6 +622,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         displayTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             self?.updateMenuBarText()
             self?.updateRelativeTime()
+            self?.updateLastCheckedItem()
         }
         displayTimer?.tolerance = 10  // Let macOS coalesce with other wake-ups
     }
@@ -638,7 +643,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Re-check for updates if 24h elapsed during sleep
         Task {
             await checkForUpdate()
-            await MainActor.run { self.updateHeaderFromCache() }
+            await MainActor.run {
+                self.updateHeaderFromCache()
+                self.updateLastCheckedItem()
+            }
         }
     }
 
@@ -723,7 +731,7 @@ extension AppDelegate {
         menu.addItem(NSMenuItem.separator())
 
         // Action items
-        let dashboardItem = NSMenuItem(title: "Open Dashboard", action: #selector(openDashboard), keyEquivalent: "d")
+        let dashboardItem = NSMenuItem(title: "Open platform.claude.com", action: #selector(openDashboard), keyEquivalent: "d")
         dashboardItem.target = self
         menu.addItem(dashboardItem)
 
@@ -893,6 +901,22 @@ extension AppDelegate {
         let testItem = NSMenuItem(title: "Test Display", action: nil, keyEquivalent: "")
         testItem.submenu = testMenu
         menu.addItem(testItem)
+
+        // App info section
+        menu.addItem(NSMenuItem.separator())
+        let gray = NSColor.systemGray
+        let infoFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        let infoAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: gray, .font: infoFont]
+
+        let repoItem = NSMenuItem(title: "Kevinjohn/claude-usage-swift v\(appVersion)", action: nil, keyEquivalent: "")
+        repoItem.attributedTitle = NSAttributedString(string: "Kevinjohn/claude-usage-swift v\(appVersion)", attributes: infoAttrs)
+        repoItem.isEnabled = false
+        menu.addItem(repoItem)
+
+        lastCheckedItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        lastCheckedItem.isEnabled = false
+        updateLastCheckedItem()
+        menu.addItem(lastCheckedItem)
 
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q"))
@@ -1328,6 +1352,33 @@ extension AppDelegate {
             let m = (elapsed % 3600) / 60
             updatedItem.title = "Updated \(h)h \(m)m ago"
         }
+    }
+
+    func updateLastCheckedItem() {
+        let gray = NSColor.systemGray
+        let infoFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        let infoAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: gray, .font: infoFont]
+
+        let lastCheck = UserDefaults.standard.double(forKey: "lastUpdateCheckTime")
+        let text: String
+        if lastCheck > 0 {
+            let date = Date(timeIntervalSince1970: lastCheck)
+            let elapsed = Int(Date().timeIntervalSince(date))
+            if elapsed < 60 {
+                text = "Checked for update: just now"
+            } else if elapsed < 3600 {
+                text = "Checked for update: \(elapsed / 60)m ago"
+            } else if elapsed < 86400 {
+                let h = elapsed / 3600
+                text = "Checked for update: \(h)h ago"
+            } else {
+                let d = elapsed / 86400
+                text = "Checked for update: \(d)d ago"
+            }
+        } else {
+            text = "Checked for update: pending"
+        }
+        lastCheckedItem.attributedTitle = NSAttributedString(string: text, attributes: infoAttrs)
     }
 }
 
