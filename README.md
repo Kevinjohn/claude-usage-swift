@@ -2,8 +2,13 @@
 
 A native macOS menu bar app that shows your Claude API usage, reset countdowns, and rate tracking at a glance.
 
+![Version](https://img.shields.io/github/v/release/Kevinjohn/claude-usage-swift)
+![License](https://img.shields.io/github/license/Kevinjohn/claude-usage-swift)
+![Release Date](https://img.shields.io/github/release-date/Kevinjohn/claude-usage-swift)
+
 ![macOS](https://img.shields.io/badge/macOS-12.0+-blue)
 ![Swift](https://img.shields.io/badge/Swift-5.9+-orange)
+![Dependencies](https://img.shields.io/badge/Dependencies-None-brightgreen)
 ![Memory](https://img.shields.io/badge/RAM-~50MB-green)
 
 ## Screenshots
