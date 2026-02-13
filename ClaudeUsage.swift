@@ -4,7 +4,7 @@ import UserNotifications
 
 // MARK: - Version
 
-private let appVersion = "2.7.0"
+private let appVersion = "2.7.1"
 
 // MARK: - Usage API
 
@@ -31,6 +31,7 @@ struct ExtraUsage: Codable {
 
 /// Central configuration for all percentage-based thresholds.
 /// Centralised here so color, countdown, and alert boundaries stay consistent.
+// Caseless enum: can't be instantiated, serving purely as a namespace for constants.
 enum DisplayThresholds {
     // Color thresholds (menu bar text color changes at these boundaries)
     static let colorGreen  = 30   // below this: grey, at/above: green
@@ -73,6 +74,8 @@ private enum UDKey {
 // MARK: - Ephemeral URLSession
 
 /// Ephemeral to avoid caching OAuth tokens or usage data to disk.
+/// Belt-and-suspenders: ephemeral config never writes to disk, and explicit cache policy
+/// ensures no in-memory cache serves stale usage data between refreshes.
 private let urlSession: URLSession = {
     let config = URLSessionConfiguration.ephemeral
     config.requestCachePolicy = .reloadIgnoringLocalCacheData
@@ -85,6 +88,7 @@ private let urlSession: URLSession = {
 private let menuBarFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
 
 /// Cached tab stop position for dropdown menu item alignment.
+/// Measured once from the widest possible label strings to avoid recalculating on every menu item render.
 private let menuItemTabLocation: CGFloat = {
     let menuFont = NSFont.menuFont(ofSize: 0)
     let maxLeftWidth = ["5-hour: 100%", "Weekly: 100%", "Sonnet: 100%"]
@@ -162,6 +166,8 @@ enum UsageError: Error, CustomStringConvertible {
 
 // MARK: - Cached Date Formatters
 
+// Two separate formatters because the API inconsistently returns fractional-second and plain
+// ISO8601 timestamps. A single reconfigured formatter would be more error-prone than two cached ones.
 private let iso8601FractionalFormatter: ISO8601DateFormatter = {
     let f = ISO8601DateFormatter()
     f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -192,6 +198,8 @@ func parseISO8601(_ string: String) -> Date? {
 // MARK: - Networking (async)
 
 /// Reads Claude Code's OAuth token from the macOS Keychain.
+/// Shells out to `/usr/bin/security` instead of using the Security framework because Claude Code's
+/// keychain entry is app-scoped — the CLI tool can access it, but the framework API cannot.
 /// Runs Process on a background queue because Process.run() blocks until exit.
 func getOAuthToken() async throws -> String {
     try await withCheckedThrowingContinuation { continuation in
@@ -207,7 +215,8 @@ func getOAuthToken() async throws -> String {
             do {
                 try task.run()
 
-                // Timeout: kill the process if it hasn't exited after 15 seconds
+                // Timeout: Keychain can hang if a system prompt appears or the service is unresponsive.
+                // Kill the process if it hasn't exited after 15 seconds.
                 let deadline = DispatchWorkItem {
                     if task.isRunning { task.terminate() }
                 }
@@ -221,6 +230,8 @@ func getOAuthToken() async throws -> String {
                     continuation.resume(throwing: UsageError.keychainNotFound)
                     return
                 }
+                // `security` CLI output includes trailing whitespace/newlines that break direct
+                // JSONDecoder. String trim + JSONSerialization is more forgiving of CLI output quirks.
                 guard let json = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
                       let jsonData = json.data(using: .utf8),
                       let creds = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
@@ -243,6 +254,7 @@ func fetchUsage(token: String) async throws -> UsageResponse {
     }
 
     var request = URLRequest(url: url)
+    // 15s matches getOAuthToken — long enough for slow networks, short enough to avoid a frozen menu bar
     request.timeoutInterval = 15
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
@@ -325,7 +337,7 @@ func saveSnapshot(pct: Double) {
     let now = Date().timeIntervalSince1970
     snapshots.append(UsageSnapshot(timestamp: now, pct: pct))
 
-    // Prune to last 6 hours, cap at 100 entries
+    // 6h captures a typical working session; 100-entry cap prevents unbounded UserDefaults growth
     let sixHoursAgo = now - 6 * 3600
     snapshots = snapshots.filter { $0.timestamp >= sixHoursAgo }
     if snapshots.count > 100 {
@@ -343,7 +355,7 @@ func computeRateString() -> String? {
           let first = snapshots.first,
           let last = snapshots.last else { return nil }
     let elapsed = last.timestamp - first.timestamp
-    guard elapsed >= 300 else { return nil } // Need 5+ minutes of data
+    guard elapsed >= 300 else { return nil } // Short windows produce too much noise for a meaningful %/hr rate
 
     let pctDelta = last.pct - first.pct
     let hoursElapsed = elapsed / 3600
@@ -372,7 +384,8 @@ func computeRateString() -> String? {
 /// Cached model name and timestamp — avoids re-parsing ~/.claude.json on every refresh.
 private var cachedModelName: String?
 private var cachedModelTimestamp: TimeInterval = 0
-private let modelCacheInterval: TimeInterval = 300  // 5 minutes
+// 5 min balances I/O cost of parsing ~/.claude.json vs responsiveness to project switches
+private let modelCacheInterval: TimeInterval = 300
 
 /// Returns the cached model name, re-reading ~/.claude.json at most every 5 minutes.
 func cachedActiveModel() -> String? {
@@ -587,6 +600,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Reset notifications
     var resetNotifyItem: NSMenuItem!
+    // Default on: resets are infrequent events that users typically want to know about
     var resetNotificationsEnabled: Bool {
         get { UserDefaults.standard.object(forKey: UDKey.resetNotificationsEnabled) as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: UDKey.resetNotificationsEnabled) }
@@ -640,7 +654,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Hide dock icon
+        // .accessory hides dock icon and app switcher entry — this is a menu-bar-only app
         NSApp.setActivationPolicy(.accessory)
 
         // Create status item
@@ -666,7 +680,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Request notification permission so reset alerts can fire
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
 
-        // Pause timers during system sleep and display sleep (no point polling when nobody is looking)
+        // Pause timers during system sleep and display sleep (no point polling when nobody is looking).
+        // Both are observed because display sleep (screen timeout) is separate from system sleep (lid close).
         let ws = NSWorkspace.shared.notificationCenter
         ws.addObserver(self, selector: #selector(handleSleep), name: NSWorkspace.willSleepNotification, object: nil)
         ws.addObserver(self, selector: #selector(handleWake), name: NSWorkspace.didWakeNotification, object: nil)
@@ -1018,7 +1033,8 @@ extension AppDelegate {
         timer = Timer.scheduledTimer(withTimeInterval: effectiveInterval, repeats: true) { [weak self] _ in
             self?.refresh()
         }
-        timer?.tolerance = max(10, effectiveInterval * 0.1)  // 10% tolerance, min 10s
+        // Tolerance lets macOS coalesce timer wake-ups with other system activity, reducing battery impact
+        timer?.tolerance = max(10, effectiveInterval * 0.1)
     }
 
     func adjustDynamicInterval(newPct: Int) {
@@ -1036,6 +1052,7 @@ extension AppDelegate {
             } else if newPct == prevPct {
                 // Unchanged — step up (slower) after 2 consecutive cycles
                 dynamicUnchangedCount += 1
+                // Require 2 consecutive unchanged readings before slowing down to avoid thrashing on minor fluctuations
                 if dynamicUnchangedCount >= 2 {
                     if let index = dynamicTierIndex {
                         let next = index + 1
@@ -1333,7 +1350,8 @@ extension AppDelegate {
             }
         }
 
-        // Stale data indicator
+        // Stale data indicator: 2x gives one full refresh cycle of grace period,
+        // avoiding false "stale" during normal timer jitter
         var staleText = ""
         if let lastFetch = lastSuccessfulFetch, Date().timeIntervalSince(lastFetch) > refreshInterval * 2 {
             staleText = " (stale)"
@@ -1394,6 +1412,7 @@ extension AppDelegate {
         }
         errorHintSeparator.isHidden = false
 
+        // In test mode, preserve cached state so clearTestDisplay() can restore instantly without an API call
         if displayMode == .live {
             fiveHourPct = nil
             fiveHourResetString = nil
