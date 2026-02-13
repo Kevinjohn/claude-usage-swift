@@ -6,7 +6,11 @@ set -e
 echo "Building ClaudeUsage..."
 
 # Extract version from Swift source (single source of truth)
-VERSION=$(grep 'let appVersion' ClaudeUsage.swift | sed 's/.*"\(.*\)".*/\1/')
+VERSION=$(grep -E '^\s*(private\s+)?let\s+appVersion\s*=' ClaudeUsage.swift | sed 's/.*"\(.*\)".*/\1/')
+if [ -z "$VERSION" ]; then
+    echo "Error: could not extract appVersion from ClaudeUsage.swift" >&2
+    exit 1
+fi
 echo "Version: $VERSION"
 
 # Create app bundle structure

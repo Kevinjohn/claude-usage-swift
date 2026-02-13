@@ -4,7 +4,7 @@ import UserNotifications
 
 // MARK: - Version
 
-private let appVersion = "2.6.5"
+private let appVersion = "2.7.0"
 
 // MARK: - Usage API
 
@@ -31,7 +31,7 @@ struct ExtraUsage: Codable {
 
 /// Central configuration for all percentage-based thresholds.
 /// Centralised here so color, countdown, and alert boundaries stay consistent.
-struct DisplayThresholds {
+enum DisplayThresholds {
     // Color thresholds (menu bar text color changes at these boundaries)
     static let colorGreen  = 30   // below this: grey, at/above: green
     static let colorYellow = 61   // at/above: yellow
@@ -51,6 +51,25 @@ struct UsageSnapshot: Codable {
     let pct: Double
 }
 
+// MARK: - UserDefaults Keys
+
+/// Centralised keys for UserDefaults — prevents silent bugs from typos in string literals.
+private enum UDKey {
+    static let usageHistory = "usageHistory"
+    static let lastUpdateCheckTime = "lastUpdateCheckTime"
+    static let latestKnownVersion = "latestKnownVersion"
+    static let showWeeklyLabel = "showWeeklyLabel"
+    static let showSonnetLabel = "showSonnetLabel"
+    static let menuBarTextMode = "menuBarTextMode"
+    static let showWeeklyMode = "showWeeklyMode"
+    static let showSonnetMode = "showSonnetMode"
+    static let resetNotificationsEnabled = "resetNotificationsEnabled"
+    static let dynamicRefreshEnabled = "dynamicRefreshEnabled"
+    static let showDynamicIcon = "showDynamicIcon"
+    static let refreshInterval = "refreshInterval"
+    static let lastResetAt = "lastResetAt"
+}
+
 // MARK: - Ephemeral URLSession
 
 /// Ephemeral to avoid caching OAuth tokens or usage data to disk.
@@ -58,6 +77,20 @@ private let urlSession: URLSession = {
     let config = URLSessionConfiguration.ephemeral
     config.requestCachePolicy = .reloadIgnoringLocalCacheData
     return URLSession(configuration: config)
+}()
+
+// MARK: - Cached Font
+
+/// Menu bar uses 11pt monospaced-digit font — cached to avoid repeated allocation.
+private let menuBarFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+
+/// Cached tab stop position for dropdown menu item alignment.
+private let menuItemTabLocation: CGFloat = {
+    let menuFont = NSFont.menuFont(ofSize: 0)
+    let maxLeftWidth = ["5-hour: 100%", "Weekly: 100%", "Sonnet: 100%"]
+        .map { ($0 as NSString).size(withAttributes: [.font: menuFont]).width }
+        .max() ?? 100
+    return ceil(maxLeftWidth) + 8
 }()
 
 // MARK: - Error Handling
@@ -173,8 +206,16 @@ func getOAuthToken() async throws -> String {
 
             do {
                 try task.run()
+
+                // Timeout: kill the process if it hasn't exited after 15 seconds
+                let deadline = DispatchWorkItem {
+                    if task.isRunning { task.terminate() }
+                }
+                DispatchQueue.global().asyncAfter(deadline: .now() + 15, execute: deadline)
+
                 let data = pipe.fileHandleForReading.readDataToEndOfFile()
                 task.waitUntilExit()
+                deadline.cancel()
 
                 guard task.terminationStatus == 0 else {
                     continuation.resume(throwing: UsageError.keychainNotFound)
@@ -202,6 +243,7 @@ func fetchUsage(token: String) async throws -> UsageResponse {
     }
 
     var request = URLRequest(url: url)
+    request.timeoutInterval = 15
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
     request.setValue("ClaudeUsage-menubar/\(appVersion)", forHTTPHeaderField: "User-Agent")
@@ -263,7 +305,7 @@ func colorForPercentage(_ pct: Int) -> NSColor {
     case ..<DisplayThresholds.colorGreen:  return .systemGray
     case ..<DisplayThresholds.colorYellow: return .systemGreen
     case ..<DisplayThresholds.colorOrange: return .systemYellow
-    case ..<DisplayThresholds.colorRed:    return NSColor(red: 0.875, green: 0.325, blue: 0.0, alpha: 1.0)
+    case ..<DisplayThresholds.colorRed:    return .systemOrange
     default:                               return .systemRed
     }
 }
@@ -271,7 +313,7 @@ func colorForPercentage(_ pct: Int) -> NSColor {
 // MARK: - Snapshot Helpers
 
 func loadSnapshots() -> [UsageSnapshot] {
-    guard let data = UserDefaults.standard.data(forKey: "usageHistory"),
+    guard let data = UserDefaults.standard.data(forKey: UDKey.usageHistory),
           let snapshots = try? JSONDecoder().decode([UsageSnapshot].self, from: data) else {
         return []
     }
@@ -291,7 +333,7 @@ func saveSnapshot(pct: Double) {
     }
 
     if let data = try? JSONEncoder().encode(snapshots) {
-        UserDefaults.standard.set(data, forKey: "usageHistory")
+        UserDefaults.standard.set(data, forKey: UDKey.usageHistory)
     }
 }
 
@@ -327,13 +369,36 @@ func computeRateString() -> String? {
 
 // MARK: - Model Detection
 
+/// Cached model name and timestamp — avoids re-parsing ~/.claude.json on every refresh.
+private var cachedModelName: String?
+private var cachedModelTimestamp: TimeInterval = 0
+private let modelCacheInterval: TimeInterval = 300  // 5 minutes
+
+/// Returns the cached model name, re-reading ~/.claude.json at most every 5 minutes.
+func cachedActiveModel() -> String? {
+    let now = Date().timeIntervalSince1970
+    if now - cachedModelTimestamp < modelCacheInterval {
+        return cachedModelName
+    }
+    cachedModelName = readActiveModel()
+    cachedModelTimestamp = now
+    return cachedModelName
+}
+
 /// Finds the most-used model across all projects in ~/.claude.json
 /// by summing output tokens, so the menu bar shows the relevant model.
 func readActiveModel() -> String? {
     let claudeJson = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude.json")
-    guard let data = try? Data(contentsOf: claudeJson),
-          let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+    let data: Data
+    do {
+        data = try Data(contentsOf: claudeJson)
+    } catch {
+        NSLog("readActiveModel: cannot read ~/.claude.json: %@", error.localizedDescription)
+        return nil
+    }
+    guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
           let projects = root["projects"] as? [String: Any] else {
+        NSLog("readActiveModel: failed to parse ~/.claude.json or missing 'projects' key")
         return nil
     }
 
@@ -398,7 +463,7 @@ func isNewerVersion(remote: String, local: String) -> Bool {
 /// On any failure, returns silently without clearing cached state.
 func checkForUpdate() async {
     let defaults = UserDefaults.standard
-    let lastCheck = defaults.double(forKey: "lastUpdateCheckTime")
+    let lastCheck = defaults.double(forKey: UDKey.lastUpdateCheckTime)
     if lastCheck > 0 && Date().timeIntervalSince1970 - lastCheck < 86400 { return }
 
     guard let url = URL(string: "https://api.github.com/repos/cfranci/claude-usage-swift/releases/latest") else { return }
@@ -406,13 +471,27 @@ func checkForUpdate() async {
     request.timeoutInterval = 15
     request.setValue("ClaudeUsage-menubar/\(appVersion)", forHTTPHeaderField: "User-Agent")
 
-    guard let (data, response) = try? await urlSession.data(for: request),
-          let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
-          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-          let tagName = json["tag_name"] as? String else { return }
+    let data: Data
+    let response: URLResponse
+    do {
+        (data, response) = try await urlSession.data(for: request)
+    } catch {
+        NSLog("checkForUpdate: network error: %@", error.localizedDescription)
+        return
+    }
+    guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+        let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+        NSLog("checkForUpdate: HTTP %d", code)
+        return
+    }
+    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let tagName = json["tag_name"] as? String else {
+        NSLog("checkForUpdate: failed to parse release JSON")
+        return
+    }
 
-    defaults.set(Date().timeIntervalSince1970, forKey: "lastUpdateCheckTime")
-    defaults.set(tagName, forKey: "latestKnownVersion")
+    defaults.set(Date().timeIntervalSince1970, forKey: UDKey.lastUpdateCheckTime)
+    defaults.set(tagName, forKey: UDKey.latestKnownVersion)
 }
 
 // MARK: - Dynamic Refresh Ladder
@@ -430,7 +509,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Cached state for menu bar display
     var fiveHourPct: Int?
     var fiveHourResetString: String?
-    var testModeActive = false
+    enum DisplayMode { case live, test }
+    var displayMode: DisplayMode = .live
     var isRefreshing = false
     var activeModelName: String?
 
@@ -456,18 +536,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var menuBarTextModeItems: [NSMenuItem] = []
     var showWeeklyLabelItem: NSMenuItem!
     var showWeeklyLabel: Bool {
-        get { UserDefaults.standard.object(forKey: "showWeeklyLabel") as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: "showWeeklyLabel") }
+        get { UserDefaults.standard.object(forKey: UDKey.showWeeklyLabel) as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: UDKey.showWeeklyLabel) }
     }
     var showSonnetLabelItem: NSMenuItem!
     var showSonnetLabel: Bool {
-        get { UserDefaults.standard.object(forKey: "showSonnetLabel") as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: "showSonnetLabel") }
+        get { UserDefaults.standard.object(forKey: UDKey.showSonnetLabel) as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: UDKey.showSonnetLabel) }
     }
     var menuBarTextMode: String {
-        get { UserDefaults.standard.string(forKey: "menuBarTextMode") ?? "off" }
+        get { UserDefaults.standard.string(forKey: UDKey.menuBarTextMode) ?? "off" }
         set {
-            UserDefaults.standard.set(newValue, forKey: "menuBarTextMode")
+            UserDefaults.standard.set(newValue, forKey: UDKey.menuBarTextMode)
             updateMenuBarTextModeMenu()
             updateMenuBarText()
         }
@@ -478,9 +558,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var weeklyModeItems: [NSMenuItem] = []
     var cachedWeeklyPct: Int?
     var showWeeklyMode: String {
-        get { UserDefaults.standard.string(forKey: "showWeeklyMode") ?? "off" }
+        get { UserDefaults.standard.string(forKey: UDKey.showWeeklyMode) ?? "off" }
         set {
-            UserDefaults.standard.set(newValue, forKey: "showWeeklyMode")
+            UserDefaults.standard.set(newValue, forKey: UDKey.showWeeklyMode)
             updateWeeklyModeMenu()
             updateMenuBarText()
         }
@@ -491,9 +571,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var sonnetModeItems: [NSMenuItem] = []
     var cachedSonnetPct: Int?
     var showSonnetMode: String {
-        get { UserDefaults.standard.string(forKey: "showSonnetMode") ?? "off" }
+        get { UserDefaults.standard.string(forKey: UDKey.showSonnetMode) ?? "off" }
         set {
-            UserDefaults.standard.set(newValue, forKey: "showSonnetMode")
+            UserDefaults.standard.set(newValue, forKey: UDKey.showSonnetMode)
             updateSonnetModeMenu()
             updateMenuBarText()
         }
@@ -501,15 +581,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Update checker
     var latestKnownVersion: String? {
-        get { UserDefaults.standard.string(forKey: "latestKnownVersion") }
-        set { UserDefaults.standard.set(newValue, forKey: "latestKnownVersion") }
+        get { UserDefaults.standard.string(forKey: UDKey.latestKnownVersion) }
+        set { UserDefaults.standard.set(newValue, forKey: UDKey.latestKnownVersion) }
     }
 
     // Reset notifications
     var resetNotifyItem: NSMenuItem!
     var resetNotificationsEnabled: Bool {
-        get { UserDefaults.standard.object(forKey: "resetNotificationsEnabled") as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: "resetNotificationsEnabled") }
+        get { UserDefaults.standard.object(forKey: UDKey.resetNotificationsEnabled) as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: UDKey.resetNotificationsEnabled) }
     }
     var previousWeeklyPct: Int?
     var previousSonnetPct: Int?
@@ -523,19 +603,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var dynamicRefreshItem: NSMenuItem!
     var dynamicStatusItem: NSMenuItem!
     var lastCheckedItem: NSMenuItem!
-    var dynamicTierIndex: Int = 0
+    var dynamicTierIndex: Int? = nil  // nil = idle at base rate
     var dynamicPreviousPct: Int? = nil
     var dynamicUnchangedCount: Int = 0
     var dynamicStatusIcon: String = "↻"  // ↑ usage increasing, ↓ polling slowing down, ↻ idle at base rate
 
     var dynamicRefreshEnabled: Bool {
-        get { UserDefaults.standard.object(forKey: "dynamicRefreshEnabled") as? Bool ?? false }
-        set { UserDefaults.standard.set(newValue, forKey: "dynamicRefreshEnabled") }
+        get { UserDefaults.standard.object(forKey: UDKey.dynamicRefreshEnabled) as? Bool ?? false }
+        set { UserDefaults.standard.set(newValue, forKey: UDKey.dynamicRefreshEnabled) }
     }
 
     var showDynamicIcon: Bool {
-        get { UserDefaults.standard.object(forKey: "showDynamicIcon") as? Bool ?? false }
-        set { UserDefaults.standard.set(newValue, forKey: "showDynamicIcon") }
+        get { UserDefaults.standard.object(forKey: UDKey.showDynamicIcon) as? Bool ?? false }
+        set { UserDefaults.standard.set(newValue, forKey: UDKey.showDynamicIcon) }
     }
 
     // Only tiers faster than the user's base interval; at idle we fall back to base
@@ -546,14 +626,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var effectiveInterval: TimeInterval {
         guard dynamicRefreshEnabled else { return refreshInterval }
         let ladder = effectiveDynamicLadder
-        guard !ladder.isEmpty, dynamicTierIndex < ladder.count else { return refreshInterval }
-        return ladder[dynamicTierIndex]
+        guard !ladder.isEmpty, let index = dynamicTierIndex, index < ladder.count else { return refreshInterval }
+        return ladder[index]
     }
 
     // Current interval in seconds
     var refreshInterval: TimeInterval = 1800 {
         didSet {
-            UserDefaults.standard.set(refreshInterval, forKey: "refreshInterval")
+            UserDefaults.standard.set(refreshInterval, forKey: UDKey.refreshInterval)
             updateIntervalMenu()
             restartTimer()
         }
@@ -572,13 +652,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = menu
 
         // Restore saved refresh interval
-        let stored = UserDefaults.standard.double(forKey: "refreshInterval")
+        let stored = UserDefaults.standard.double(forKey: UDKey.refreshInterval)
         if stored > 0 { refreshInterval = stored }
 
         // Initialize dynamic refresh state
         if dynamicRefreshEnabled {
-            let ladder = effectiveDynamicLadder
-            dynamicTierIndex = ladder.count  // At base rate (user's interval)
+            dynamicTierIndex = nil  // At base rate (user's interval)
             dynamicPreviousPct = nil
             dynamicUnchangedCount = 0
             dynamicStatusIcon = "↻"
@@ -905,7 +984,7 @@ extension AppDelegate {
         // App info section
         menu.addItem(NSMenuItem.separator())
         let gray = NSColor.systemGray
-        let infoFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        let infoFont = menuBarFont
         let infoAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: gray, .font: infoFont]
 
         let repoItem = NSMenuItem(title: "Kevinjohn/claude-usage-swift v\(appVersion)", action: nil, keyEquivalent: "")
@@ -950,24 +1029,29 @@ extension AppDelegate {
         if let prevPct = dynamicPreviousPct {
             if newPct > prevPct {
                 // Usage increasing — step down (faster)
-                dynamicTierIndex = max(dynamicTierIndex - 1, 0)
+                let currentIndex = dynamicTierIndex ?? ladder.count
+                dynamicTierIndex = max(currentIndex - 1, 0)
                 dynamicUnchangedCount = 0
                 dynamicStatusIcon = "↑"
             } else if newPct == prevPct {
                 // Unchanged — step up (slower) after 2 consecutive cycles
                 dynamicUnchangedCount += 1
                 if dynamicUnchangedCount >= 2 {
-                    dynamicTierIndex = min(dynamicTierIndex + 1, ladder.count)
+                    if let index = dynamicTierIndex {
+                        let next = index + 1
+                        dynamicTierIndex = next < ladder.count ? next : nil
+                    }
                     dynamicUnchangedCount = 0
                 }
                 // ↓ if still cooling down from a faster tier, ↻ if back at base rate
-                if dynamicTierIndex >= ladder.count {
+                if dynamicTierIndex == nil {
                     dynamicStatusIcon = "↻"
                 } else {
                     dynamicStatusIcon = "↓"
                 }
             } else {
                 // Usage decreased (reset cycle) — reset to idle
+                dynamicTierIndex = nil
                 dynamicUnchangedCount = 0
                 dynamicStatusIcon = "↻"
             }
@@ -996,15 +1080,14 @@ extension AppDelegate {
         dynamicRefreshItem.state = dynamicRefreshEnabled ? .on : .off
 
         if dynamicRefreshEnabled {
-            let ladder = effectiveDynamicLadder
-            dynamicTierIndex = ladder.count  // Start at base rate (user's interval)
+            dynamicTierIndex = nil  // Start at base rate (user's interval)
             dynamicPreviousPct = fiveHourPct
             dynamicUnchangedCount = 0
             dynamicStatusIcon = "↻"
         } else {
             dynamicPreviousPct = nil
             dynamicUnchangedCount = 0
-            dynamicTierIndex = 0
+            dynamicTierIndex = nil
             dynamicStatusIcon = "↻"
         }
 
@@ -1026,7 +1109,7 @@ extension AppDelegate {
             do {
                 let token = try await getOAuthToken()
                 let usage = try await fetchUsage(token: token)
-                let model = readActiveModel()
+                let model = cachedActiveModel()
                 await MainActor.run {
                     self.activeModelName = model
                     self.updateUI(usage: usage)
@@ -1062,16 +1145,15 @@ extension AppDelegate {
             fiveHourItem.attributedTitle = tabbedMenuItemString(left: "5-hour: \(pct)%", right: "(resets \(reset))")
 
             // New reset timestamp means a new usage cycle — clear stale state
-            let storedResetAt = UserDefaults.standard.string(forKey: "lastResetAt")
+            let storedResetAt = UserDefaults.standard.string(forKey: UDKey.lastResetAt)
             if let resetAt = h.resets_at, resetAt != storedResetAt {
-                UserDefaults.standard.set(resetAt, forKey: "lastResetAt")
-                UserDefaults.standard.removeObject(forKey: "usageHistory")
+                UserDefaults.standard.set(resetAt, forKey: UDKey.lastResetAt)
+                UserDefaults.standard.removeObject(forKey: UDKey.usageHistory)
                 // Reset dynamic refresh state on new cycle
                 dynamicPreviousPct = nil
                 dynamicUnchangedCount = 0
                 dynamicStatusIcon = "↻"
-                let ladder = effectiveDynamicLadder
-                dynamicTierIndex = ladder.count
+                dynamicTierIndex = nil
                 updateDynamicStatusItem()
             }
 
@@ -1152,7 +1234,7 @@ extension AppDelegate {
 extension AppDelegate {
     func setMenuBarText(_ text: String, color: NSColor? = nil) {
         guard let button = statusItem.button else { return }
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        let font = menuBarFont
         if let color = color {
             button.attributedTitle = NSAttributedString(string: text, attributes: [
                 .foregroundColor: color,
@@ -1185,12 +1267,8 @@ extension AppDelegate {
 
     func tabbedMenuItemString(left: String, right: String) -> NSAttributedString {
         let menuFont = NSFont.menuFont(ofSize: 0)
-        // Tab position just past the widest possible left column
-        let maxLeftWidth = ["5-hour: 100%", "Weekly: 100%", "Sonnet: 100%"]
-            .map { ($0 as NSString).size(withAttributes: [.font: menuFont]).width }
-            .max() ?? 100
         let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.tabStops = [NSTextTab(textAlignment: .left, location: ceil(maxLeftWidth) + 8)]
+        paragraphStyle.tabStops = [NSTextTab(textAlignment: .left, location: menuItemTabLocation)]
         return NSAttributedString(string: "\(left)\t\(right)", attributes: [
             .font: menuFont,
             .paragraphStyle: paragraphStyle
@@ -1216,11 +1294,8 @@ extension AppDelegate {
     }
 
     func updateMenuBarText() {
-        // One-shot guard: skip one refresh cycle after test display so it stays visible
-        if testModeActive {
-            testModeActive = false
-            return
-        }
+        // Skip updates while test display is active so it stays visible
+        if displayMode == .test { return }
         guard let pct = fiveHourPct else { return }
         let prefix: String
         switch menuBarTextMode {
@@ -1266,7 +1341,7 @@ extension AppDelegate {
 
         // Build attributed string with per-section colors when extra sections are shown
         if weeklyPctValue != nil || sonnetPctValue != nil {
-            let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+            let font = menuBarFont
             let result = NSMutableAttributedString()
             result.append(NSAttributedString(string: text, attributes: [
                 .foregroundColor: color,
@@ -1302,7 +1377,7 @@ extension AppDelegate {
     }
 
     func showError(_ error: UsageError) {
-        let barText = testModeActive ? "TEST: \(error.menuBarText)" : error.menuBarText
+        let barText = displayMode == .test ? "TEST: \(error.menuBarText)" : error.menuBarText
         setMenuBarText(barText, color: error.menuBarColor)
 
         var lines = [error.description]
@@ -1319,7 +1394,7 @@ extension AppDelegate {
         }
         errorHintSeparator.isHidden = false
 
-        if !testModeActive {
+        if displayMode == .live {
             fiveHourPct = nil
             fiveHourResetString = nil
             cachedWeeklyPct = nil
@@ -1356,10 +1431,10 @@ extension AppDelegate {
 
     func updateLastCheckedItem() {
         let gray = NSColor.systemGray
-        let infoFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        let infoFont = menuBarFont
         let infoAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: gray, .font: infoFont]
 
-        let lastCheck = UserDefaults.standard.double(forKey: "lastUpdateCheckTime")
+        let lastCheck = UserDefaults.standard.double(forKey: UDKey.lastUpdateCheckTime)
         let text: String
         if lastCheck > 0 {
             let date = Date(timeIntervalSince1970: lastCheck)
@@ -1394,7 +1469,9 @@ extension AppDelegate {
         let request = UNNotificationRequest(
             identifier: "reset-\(category)-\(Date().timeIntervalSince1970)",
             content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error = error { NSLog("Notification delivery failed: %@", error.localizedDescription) }
+        }
     }
 
     @objc func toggleResetNotifications() {
@@ -1506,12 +1583,12 @@ extension AppDelegate {
     }
 
     @objc func testPercentage(_ sender: NSMenuItem) {
-        testModeActive = true
+        displayMode = .test
         let pct = sender.tag
 
         var resetStr = fiveHourResetString
         if resetStr == nil {
-            resetStr = ISO8601DateFormatter().string(from: Date().addingTimeInterval(2 * 3600 + 37 * 60))
+            resetStr = iso8601Formatter.string(from: Date().addingTimeInterval(2 * 3600 + 37 * 60))
         }
 
         let (text, color) = generateMenuBarText(pct: pct, resetString: resetStr, prefix: "TEST: ")
@@ -1519,17 +1596,17 @@ extension AppDelegate {
     }
 
     @objc func testWeekly(_ sender: NSMenuItem) {
-        testModeActive = true
+        displayMode = .test
         let weeklyPct = sender.tag
 
         // Use current 5-hour data or a sensible default
         let pct = fiveHourPct ?? 45
         var resetStr = fiveHourResetString
         if resetStr == nil {
-            resetStr = ISO8601DateFormatter().string(from: Date().addingTimeInterval(2 * 3600 + 37 * 60))
+            resetStr = iso8601Formatter.string(from: Date().addingTimeInterval(2 * 3600 + 37 * 60))
         }
 
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        let font = menuBarFont
         let (text, color) = generateMenuBarText(pct: pct, resetString: resetStr, prefix: "TEST: ")
         let weeklyColor = colorForPercentage(weeklyPct)
 
@@ -1547,16 +1624,16 @@ extension AppDelegate {
     }
 
     @objc func testSonnet(_ sender: NSMenuItem) {
-        testModeActive = true
+        displayMode = .test
         let sonnetPct = sender.tag
 
         let pct = fiveHourPct ?? 45
         var resetStr = fiveHourResetString
         if resetStr == nil {
-            resetStr = ISO8601DateFormatter().string(from: Date().addingTimeInterval(2 * 3600 + 37 * 60))
+            resetStr = iso8601Formatter.string(from: Date().addingTimeInterval(2 * 3600 + 37 * 60))
         }
 
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        let font = menuBarFont
         let (text, color) = generateMenuBarText(pct: pct, resetString: resetStr, prefix: "TEST: ")
         let sonnetColor = colorForPercentage(sonnetPct)
 
@@ -1574,7 +1651,7 @@ extension AppDelegate {
     }
 
     @objc func testError(_ sender: NSMenuItem) {
-        testModeActive = true
+        displayMode = .test
         let dummyError: Error = NSError(domain: "test", code: 0, userInfo: [NSLocalizedDescriptionKey: "simulated error"])
         let error: UsageError
         switch sender.tag {
@@ -1592,7 +1669,7 @@ extension AppDelegate {
     }
 
     @objc func clearTestDisplay() {
-        testModeActive = false
+        displayMode = .live
         for item in errorHintItems { item.isHidden = true }
         errorHintSeparator.isHidden = true
         if fiveHourPct != nil {
