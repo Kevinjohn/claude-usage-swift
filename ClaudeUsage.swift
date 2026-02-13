@@ -4,7 +4,7 @@ import UserNotifications
 
 // MARK: - Version
 
-private let appVersion = "2.7.1"
+private let appVersion = "2.7.2"
 
 // MARK: - Usage API
 
@@ -257,6 +257,7 @@ func fetchUsage(token: String) async throws -> UsageResponse {
     // 15s matches getOAuthToken — long enough for slow networks, short enough to avoid a frozen menu bar
     request.timeoutInterval = 15
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    // Enable the OAuth usage endpoint (requires this beta feature flag)
     request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
     request.setValue("ClaudeUsage-menubar/\(appVersion)", forHTTPHeaderField: "User-Agent")
 
@@ -371,6 +372,7 @@ func computeRateString() -> String? {
     }
     let hoursToLimit = remaining / ratePerHour
 
+    // Skip "limit in ~Xh" estimate when it's unreasonably far out
     guard hoursToLimit < 100 else {
         return String(format: "~%.0f%%/hr", ratePerHour)
     }
@@ -430,6 +432,7 @@ func readActiveModel() -> String? {
         }
     }
 
+    // Pick the model with the highest total output tokens across all projects
     guard let topModel = modelTotals.max(by: { $0.value < $1.value })?.key else {
         return nil
     }
@@ -477,7 +480,7 @@ func isNewerVersion(remote: String, local: String) -> Bool {
 func checkForUpdate() async {
     let defaults = UserDefaults.standard
     let lastCheck = defaults.double(forKey: UDKey.lastUpdateCheckTime)
-    if lastCheck > 0 && Date().timeIntervalSince1970 - lastCheck < 86400 { return }
+    if lastCheck > 0 && Date().timeIntervalSince1970 - lastCheck < 86400 { return }  // 86400 = 24 hours in seconds
 
     guard let url = URL(string: "https://api.github.com/repos/cfranci/claude-usage-swift/releases/latest") else { return }
     var request = URLRequest(url: url)
@@ -519,7 +522,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var timer: Timer?
     var displayTimer: Timer?
 
-    // Cached state for menu bar display
+    // Cached from last successful API response — used by updateMenuBarText() between refreshes
     var fiveHourPct: Int?
     var fiveHourResetString: String?
     enum DisplayMode { case live, test }
@@ -605,11 +608,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         get { UserDefaults.standard.object(forKey: UDKey.resetNotificationsEnabled) as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: UDKey.resetNotificationsEnabled) }
     }
+    // Track previous percentages to detect transitions to 0% for reset notifications
     var previousWeeklyPct: Int?
     var previousSonnetPct: Int?
     var previousExtraPct: Int?
 
-    // Stale data tracking
+    // lastSuccessfulFetch: last successful API response — used for stale data detection
+    // lastUpdateTime: last data update (success or error) — drives "Updated X ago" display
     var lastSuccessfulFetch: Date?
     var lastUpdateTime: Date?
 
@@ -618,8 +623,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var dynamicStatusItem: NSMenuItem!
     var lastCheckedItem: NSMenuItem!
     var dynamicTierIndex: Int? = nil  // nil = idle at base rate
-    var dynamicPreviousPct: Int? = nil
-    var dynamicUnchangedCount: Int = 0
+    var dynamicPreviousPct: Int? = nil  // Last pct seen by adjustDynamicInterval() — compared to detect change
+    var dynamicUnchangedCount: Int = 0  // Consecutive unchanged cycles — triggers step-up after reaching 2
     var dynamicStatusIcon: String = "↻"  // ↑ usage increasing, ↓ polling slowing down, ↻ idle at base rate
 
     var dynamicRefreshEnabled: Bool {
@@ -769,6 +774,7 @@ extension AppDelegate {
         errorHintSeparator = NSMenuItem.separator()
         errorHintSeparator.isHidden = true
 
+        // Pre-allocate 4 hidden items: 1 for error description + up to 3 for multiline hint text
         errorHintItems = (0..<4).map { _ in
             let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
             item.isEnabled = false
@@ -936,6 +942,7 @@ extension AppDelegate {
 
         let thresholdMenu = NSMenu()
         let t = DisplayThresholds.self
+        // Each test value is the midpoint of its color band so the preview shows a representative color
         let testRanges: [(label: String, pct: Int)] = [
             ("0–\(t.colorGreen - 1)%",  t.colorGreen / 2),
             ("\(t.colorGreen)–\(t.colorYellow - 1)%", (t.colorGreen + t.colorYellow) / 2),
@@ -1045,6 +1052,7 @@ extension AppDelegate {
         if let prevPct = dynamicPreviousPct {
             if newPct > prevPct {
                 // Usage increasing — step down (faster)
+                // When idle (nil), treat as one past the end so stepping down enters the slowest fast tier
                 let currentIndex = dynamicTierIndex ?? ladder.count
                 dynamicTierIndex = max(currentIndex - 1, 0)
                 dynamicUnchangedCount = 0
@@ -1056,7 +1064,7 @@ extension AppDelegate {
                 if dynamicUnchangedCount >= 2 {
                     if let index = dynamicTierIndex {
                         let next = index + 1
-                        dynamicTierIndex = next < ladder.count ? next : nil
+                        dynamicTierIndex = next < ladder.count ? next : nil  // Return to base rate (nil) if past the last tier
                     }
                     dynamicUnchangedCount = 0
                 }
@@ -1153,6 +1161,7 @@ extension AppDelegate {
         // 5-hour
         if let h = usage.five_hour {
             let pct = Int(h.utilization)
+            // Detect transition from >0% to 0% (usage reset) and notify the user
             if let prev = fiveHourPct, prev > 0, pct == 0 { sendResetNotification(category: "5-hour") }
             fiveHourPct = pct
             fiveHourResetString = h.resets_at
@@ -1322,6 +1331,7 @@ extension AppDelegate {
         case "5hour":  prefix = "5 Hour: "
         default:       prefix = ""
         }
+        // Show dynamic icon when active AND either not idle or user opted to always show the idle icon
         let showIcon = dynamicRefreshEnabled && (dynamicStatusIcon != "↻" || showDynamicIcon)
         let suffix = showIcon ? " \(dynamicStatusIcon)" : ""
         var (text, color) = generateMenuBarText(pct: pct, resetString: fiveHourResetString, prefix: prefix, suffix: suffix)
@@ -1486,6 +1496,7 @@ extension AppDelegate {
         content.body = "\(category) usage has reset to 0%"
         content.sound = .default
         let request = UNNotificationRequest(
+            // Timestamp makes each notification unique so macOS doesn't deduplicate repeated resets
             identifier: "reset-\(category)-\(Date().timeIntervalSince1970)",
             content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request) { error in
@@ -1691,6 +1702,7 @@ extension AppDelegate {
         displayMode = .live
         for item in errorHintItems { item.isHidden = true }
         errorHintSeparator.isHidden = true
+        // Restore from cached data if available, otherwise fetch fresh from the API
         if fiveHourPct != nil {
             updateMenuBarText()
         } else {
