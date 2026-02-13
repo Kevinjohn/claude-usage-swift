@@ -4,7 +4,7 @@ import UserNotifications
 
 // MARK: - Version
 
-private let appVersion = "2.7.2"
+private let appVersion = "2.7.3"
 
 // MARK: - Usage API
 
@@ -217,12 +217,20 @@ func getOAuthToken() async throws -> String {
 
                 // Timeout: Keychain can hang if a system prompt appears or the service is unresponsive.
                 // Kill the process if it hasn't exited after 15 seconds.
+                let readHandle = pipe.fileHandleForReading
                 let deadline = DispatchWorkItem {
                     if task.isRunning { task.terminate() }
+                    // If SIGTERM is ignored, force-kill after 2s grace period
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+                        if task.isRunning { kill(task.processIdentifier, SIGKILL) }
+                    }
+                    // Close our read end so readDataToEndOfFile() unblocks even if the
+                    // write end is held open by an inherited fd
+                    try? readHandle.close()
                 }
                 DispatchQueue.global().asyncAfter(deadline: .now() + 15, execute: deadline)
 
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let data = readHandle.readDataToEndOfFile()
                 task.waitUntilExit()
                 deadline.cancel()
 
@@ -1134,9 +1142,8 @@ extension AppDelegate {
             do {
                 let token = try await getOAuthToken()
                 let usage = try await fetchUsage(token: token)
-                let model = cachedActiveModel()
                 await MainActor.run {
-                    self.activeModelName = model
+                    self.activeModelName = cachedActiveModel()
                     self.updateUI(usage: usage)
                     self.isRefreshing = false
                 }
