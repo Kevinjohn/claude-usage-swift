@@ -4,7 +4,7 @@ import UserNotifications
 
 // MARK: - Version
 
-private let appVersion = "2.7.3"
+private let appVersion = "2.8.0"
 
 // MARK: - Usage API
 
@@ -537,6 +537,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var displayMode: DisplayMode = .live
     var isRefreshing = false
     var activeModelName: String?
+    // WHY track this: only send one macOS notification per hiding event, not on every
+    // display timer tick (60s) while the item remains hidden
+    var didNotifyMenuBarHidden = false
 
     // Menu items
     var headerItem: NSMenuItem!
@@ -1374,40 +1377,136 @@ extension AppDelegate {
             staleText = " (stale)"
         }
 
-        // Build attributed string with per-section colors when extra sections are shown
+        // Build attributed string with per-section colors when extra sections are shown.
+        // Progressively abbreviates to fit within ~25% of screen width:
+        //   Level 0: full labels   "opus: 75% / 2h 37m | weekly: 72% | sonnet: 85%"
+        //   Level 1: short labels  "opus: 75% / 2h 37m | w: 72% | s: 85%"
+        //   Level 2: no countdown  "opus: 75% | w: 72% | s: 85%"
+        //   Level 3: no prefix     "75% | w: 72% | s: 85%"
         if weeklyPctValue != nil || sonnetPctValue != nil {
             let font = menuBarFont
-            let result = NSMutableAttributedString()
-            result.append(NSAttributedString(string: text, attributes: [
-                .foregroundColor: color,
-                .font: font
-            ]))
-            if let weeklyPct = weeklyPctValue {
-                let weeklyColor = colorForPercentage(weeklyPct)
-                let weeklyText = showWeeklyLabel ? " | weekly: \(weeklyPct)%" : " | \(weeklyPct)%"
-                result.append(NSAttributedString(string: weeklyText, attributes: [
-                    .foregroundColor: weeklyColor,
-                    .font: font
-                ]))
-            }
-            if let sonnetPct = sonnetPctValue {
-                let sonnetColor = colorForPercentage(sonnetPct)
-                let sonnetText = showSonnetLabel ? " | sonnet: \(sonnetPct)%" : " | \(sonnetPct)%"
-                result.append(NSAttributedString(string: sonnetText, attributes: [
-                    .foregroundColor: sonnetColor,
-                    .font: font
-                ]))
-            }
-            if !staleText.isEmpty {
-                result.append(NSAttributedString(string: staleText, attributes: [
+            // WHY 25% of screen width: leaves room for system icons (clock, WiFi, battery,
+            // Control Center ~200pt) and other menu bar apps, while adapting to different
+            // display sizes (360pt on 1440pt laptop, 640pt on 2560pt external monitor)
+            let screenWidth = NSScreen.main?.frame.width ?? 1440
+            let maxTextWidth = screenWidth * 0.25
+            // WHY 16pt: NSStatusBarButton adds ~12pt horizontal padding plus our 1pt border
+            // on each side, which isn't included in NSAttributedString.size().width
+            let buttonPadding: CGFloat = 16
+
+            for level in 0...3 {
+                let mainText: String
+                if level >= 3 {
+                    mainText = "\(pct)%\(suffix)"
+                } else if level >= 2 {
+                    mainText = "\(prefix)\(pct)%\(suffix)"
+                } else {
+                    mainText = text
+                }
+                // WHY default to short labels when both shown: two full labels
+                // ("weekly:" + "sonnet:") add ~20 extra characters that push past
+                // comfortable menu bar width even without a prefix
+                let bothShown = weeklyPctValue != nil && sonnetPctValue != nil
+                let shortLabels = bothShown || level >= 1
+
+                let result = NSMutableAttributedString()
+                result.append(NSAttributedString(string: mainText, attributes: [
                     .foregroundColor: color,
                     .font: font
                 ]))
+                if let weeklyPct = weeklyPctValue {
+                    let weeklyColor = colorForPercentage(weeklyPct)
+                    let weeklyText = shortLabels
+                        ? (showWeeklyLabel ? " | w: \(weeklyPct)%" : " | \(weeklyPct)%")
+                        : (showWeeklyLabel ? " | weekly: \(weeklyPct)%" : " | \(weeklyPct)%")
+                    result.append(NSAttributedString(string: weeklyText, attributes: [
+                        .foregroundColor: weeklyColor,
+                        .font: font
+                    ]))
+                }
+                if let sonnetPct = sonnetPctValue {
+                    let sonnetColor = colorForPercentage(sonnetPct)
+                    let sonnetText = shortLabels
+                        ? (showSonnetLabel ? " | s: \(sonnetPct)%" : " | \(sonnetPct)%")
+                        : (showSonnetLabel ? " | sonnet: \(sonnetPct)%" : " | \(sonnetPct)%")
+                    result.append(NSAttributedString(string: sonnetText, attributes: [
+                        .foregroundColor: sonnetColor,
+                        .font: font
+                    ]))
+                }
+                if !staleText.isEmpty {
+                    result.append(NSAttributedString(string: staleText, attributes: [
+                        .foregroundColor: color,
+                        .font: font
+                    ]))
+                }
+
+                // WHY always accept level 3: an invisible status item is worse than
+                // abbreviated text — the shortest format must always render
+                if result.size().width + buttonPadding <= maxTextWidth || level == 3 {
+                    setMenuBarAttributedText(result, borderColor: color)
+                    break
+                }
             }
-            setMenuBarAttributedText(result, borderColor: color)
         } else {
             text += staleText
             setMenuBarText(text, color: color)
+        }
+
+        verifyMenuBarVisibility()
+    }
+
+    /// Best-effort check that the status item is actually visible after layout.
+    /// macOS hides status items that don't fit rather than truncating them, and
+    /// provides no API to detect this. We check on the next run-loop iteration
+    /// (after layout completes) whether the button's window is on-screen.
+    private func verifyMenuBarVisibility() {
+        // WHY async: the layout pass hasn't completed yet when this is called
+        // synchronously from updateMenuBarText — we need macOS to position the
+        // status item first, then check whether it's actually on-screen
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            guard let button = self.statusItem.button else { return }
+
+            // WHY both checks: macOS may either nil out the window, give it zero
+            // width, or position it off-screen when hiding a status item — the
+            // behaviour varies across macOS versions, so we check all three
+            let isVisible: Bool
+            if let window = button.window {
+                let screenFrame = NSScreen.main?.frame ?? .zero
+                isVisible = window.frame.width > 0 && screenFrame.intersects(window.frame)
+            } else {
+                isVisible = false
+            }
+
+            if !isVisible {
+                // Recover: fall back to minimal percentage-only text
+                if let pct = self.fiveHourPct {
+                    let color = colorForPercentage(pct)
+                    self.setMenuBarText("\(pct)%", color: color)
+                }
+                // Notify once per hiding event so the user knows what happened
+                if !self.didNotifyMenuBarHidden {
+                    self.didNotifyMenuBarHidden = true
+                    let content = UNMutableNotificationContent()
+                    content.title = "Menu bar text shortened"
+                    content.body = "The display text was too long for the available menu bar space, so macOS hid the app. It has been shortened to fit."
+                    content.sound = .default
+                    // WHY fixed identifier (not timestamped like reset notifications):
+                    // we want macOS to deduplicate so only one "text shortened"
+                    // notification is visible at a time
+                    let request = UNNotificationRequest(
+                        identifier: "menuBarHidden",
+                        content: content, trigger: nil)
+                    UNUserNotificationCenter.current().add(request) { error in
+                        if let error = error { NSLog("Notification delivery failed: %@", error.localizedDescription) }
+                    }
+                }
+            } else {
+                // WHY reset: so the notification fires again if the item gets hidden
+                // in a future update (e.g. user re-enables a verbose display mode)
+                self.didNotifyMenuBarHidden = false
+            }
         }
     }
 
