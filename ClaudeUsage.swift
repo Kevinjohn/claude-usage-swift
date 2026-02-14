@@ -4,7 +4,7 @@ import UserNotifications
 
 // MARK: - Version
 
-private let appVersion = "2.8.0"
+private let appVersion = "2.8.1"
 
 // MARK: - Usage API
 
@@ -490,7 +490,7 @@ func checkForUpdate() async {
     let lastCheck = defaults.double(forKey: UDKey.lastUpdateCheckTime)
     if lastCheck > 0 && Date().timeIntervalSince1970 - lastCheck < 86400 { return }  // 86400 = 24 hours in seconds
 
-    guard let url = URL(string: "https://api.github.com/repos/cfranci/claude-usage-swift/releases/latest") else { return }
+    guard let url = URL(string: "https://api.github.com/repos/Kevinjohn/claude-usage-swift/releases/latest") else { return }
     var request = URLRequest(url: url)
     request.timeoutInterval = 15
     request.setValue("ClaudeUsage-menubar/\(appVersion)", forHTTPHeaderField: "User-Agent")
@@ -1139,7 +1139,9 @@ extension AppDelegate {
     @objc func refresh() {
         guard !isRefreshing else { return }
         isRefreshing = true
-        setMenuBarText("...")
+        if displayMode == .live {
+            setMenuBarText("...")
+        }
 
         Task {
             do {
@@ -1388,7 +1390,7 @@ extension AppDelegate {
             // WHY 25% of screen width: leaves room for system icons (clock, WiFi, battery,
             // Control Center ~200pt) and other menu bar apps, while adapting to different
             // display sizes (360pt on 1440pt laptop, 640pt on 2560pt external monitor)
-            let screenWidth = NSScreen.main?.frame.width ?? 1440
+            let screenWidth = statusItem.button?.window?.screen?.frame.width ?? NSScreen.main?.frame.width ?? 1440
             let maxTextWidth = screenWidth * 0.25
             // WHY 16pt: NSStatusBarButton adds ~12pt horizontal padding plus our 1pt border
             // on each side, which isn't included in NSAttributedString.size().width
@@ -1473,7 +1475,7 @@ extension AppDelegate {
             // behaviour varies across macOS versions, so we check all three
             let isVisible: Bool
             if let window = button.window {
-                let screenFrame = NSScreen.main?.frame ?? .zero
+                let screenFrame = window.screen?.frame ?? NSScreen.main?.frame ?? .zero
                 isVisible = window.frame.width > 0 && screenFrame.intersects(window.frame)
             } else {
                 isVisible = false
@@ -1632,7 +1634,7 @@ extension AppDelegate {
     }
 
     @objc func openReleasesPage() {
-        if let url = URL(string: "https://github.com/cfranci/claude-usage-swift/releases/latest") {
+        if let url = URL(string: "https://github.com/Kevinjohn/claude-usage-swift/releases/latest") {
             NSWorkspace.shared.open(url)
         }
     }
