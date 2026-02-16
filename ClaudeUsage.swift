@@ -4,7 +4,7 @@ import UserNotifications
 
 // MARK: - Version
 
-private let appVersion = "2.8.1"
+private let appVersion = "2.9.0"
 
 // MARK: - Usage API
 
@@ -71,6 +71,55 @@ private enum UDKey {
     static let lastResetAt = "lastResetAt"
 }
 
+// MARK: - Provider Configuration
+
+/// Provider-specific branding, URLs, and labels — change this block to fork for a different provider.
+// Caseless enum: can't be instantiated, serving purely as a namespace for constants.
+private enum Provider {
+    // Branding
+    static let appName = "Claude Code usage:"
+    static let dashboardLabel = "Open console.anthropic.com"
+    static let repoSlug = "Kevinjohn/claude-usage-swift"
+
+    // Category labels
+    static let primaryLabel = "5-hour"       // rolling usage window
+    static let weeklyLabel = "Weekly"
+    static let modelLabel = "Sonnet"         // model-specific limit
+    static let extraLabel = "Extra"
+    // WHY separate short labels: the progressive abbreviation system
+    // (abbreviatedMenuBarText) uses these when the full labels don't fit
+    static let weeklyShort = "w:"
+    static let modelShort = "s:"
+
+    // Menu bar prefix options
+    static let prefixBrand = "Claude: "
+    static let prefixShort = "CC: "
+    static let prefixPrimary = "5 Hour: "
+
+    // API
+    static let apiURL = "https://api.anthropic.com/api/oauth/usage"
+    // WHY a tuple: keeps the HTTP header name and value paired so they can't
+    // be accidentally transposed when passed to setValue(_:forHTTPHeaderField:)
+    static let betaHeader = ("anthropic-beta", "oauth-2025-04-20")
+    static let userAgent = "ClaudeUsage-menubar"
+
+    // Credentials — these must match Claude Code's actual storage format;
+    // if Claude Code changes its keychain layout, update these to match
+    static let keychainService = "Claude Code-credentials"
+    static let credentialKeyPath = "claudeAiOauth"
+    static let configFile = ".claude.json"
+
+    // Model families (for shortModelName detection)
+    static let modelFamilies = ["opus", "sonnet", "haiku"]
+
+    // URLs
+    static let dashboardURL = "https://console.anthropic.com/settings/usage"
+    // WHY no https:// prefix: displayed as readable text in error hints, not opened as a URL
+    static let statusPageURL = "status.anthropic.com"
+    static let releasesURL = "https://github.com/Kevinjohn/claude-usage-swift/releases/latest"
+    static let releasesAPI = "https://api.github.com/repos/Kevinjohn/claude-usage-swift/releases/latest"
+}
+
 // MARK: - Ephemeral URLSession
 
 /// Ephemeral to avoid caching OAuth tokens or usage data to disk.
@@ -91,7 +140,7 @@ private let menuBarFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .
 /// Measured once from the widest possible label strings to avoid recalculating on every menu item render.
 private let menuItemTabLocation: CGFloat = {
     let menuFont = NSFont.menuFont(ofSize: 0)
-    let maxLeftWidth = ["5-hour: 100%", "Weekly: 100%", "Sonnet: 100%"]
+    let maxLeftWidth = ["\(Provider.primaryLabel): 100%", "\(Provider.weeklyLabel): 100%", "\(Provider.modelLabel): 100%"]
         .map { ($0 as NSString).size(withAttributes: [.font: menuFont]).width }
         .max() ?? 100
     return ceil(maxLeftWidth) + 8
@@ -136,7 +185,7 @@ enum UsageError: Error, CustomStringConvertible {
         case .httpError(let code) where code == 401 || code == 403:
             return "HTTP \(code) — token expired or invalid"
         case .httpError(let code):
-            return "HTTP \(code) from Anthropic API"
+            return "HTTP \(code) from the API"
         case .decodingError(let error):
             return "Could not decode API response: \(error.localizedDescription)"
         }
@@ -151,13 +200,13 @@ enum UsageError: Error, CustomStringConvertible {
         case .networkError:
             return "Check your internet connection and try\nRefresh from the menu"
         case .httpError(let code) where code == 401 || code == 403:
-            return "Try: log in at console.anthropic.com, or\nstart Claude Code to refresh your token"
+            return "Try: log in at \(Provider.dashboardURL), or\nrestart to refresh your token"
         case .httpError(let code) where code == 429:
             return "Rate limited — wait a moment and try\nRefresh from the menu"
         case .httpError(let code) where code >= 500 && code < 600:
-            return "Anthropic API is having issues —\ntry again later"
+            return "The API is having issues —\ntry again later"
         case .httpError:
-            return "Unexpected error — try Refresh from\nthe menu, or check status.anthropic.com"
+            return "Unexpected error — try Refresh from\nthe menu, or check \(Provider.statusPageURL)"
         case .decodingError:
             return "The API response format may have changed —\ncheck for an app update"
         }
@@ -206,7 +255,7 @@ func getOAuthToken() async throws -> String {
         DispatchQueue.global(qos: .userInitiated).async {
             let task = Process()
             task.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-            task.arguments = ["find-generic-password", "-s", "Claude Code-credentials", "-w"]
+            task.arguments = ["find-generic-password", "-s", Provider.keychainService, "-w"]
 
             let pipe = Pipe()
             task.standardOutput = pipe
@@ -243,7 +292,7 @@ func getOAuthToken() async throws -> String {
                 guard let json = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
                       let jsonData = json.data(using: .utf8),
                       let creds = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-                      let oauth = creds["claudeAiOauth"] as? [String: Any],
+                      let oauth = creds[Provider.credentialKeyPath] as? [String: Any],
                       let token = oauth["accessToken"] as? String else {
                     continuation.resume(throwing: UsageError.keychainParseFailure)
                     return
@@ -257,7 +306,7 @@ func getOAuthToken() async throws -> String {
 }
 
 func fetchUsage(token: String) async throws -> UsageResponse {
-    guard let url = URL(string: "https://api.anthropic.com/api/oauth/usage") else {
+    guard let url = URL(string: Provider.apiURL) else {
         throw UsageError.networkError(URLError(.badURL))
     }
 
@@ -266,8 +315,8 @@ func fetchUsage(token: String) async throws -> UsageResponse {
     request.timeoutInterval = 15
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     // Enable the OAuth usage endpoint (requires this beta feature flag)
-    request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-    request.setValue("ClaudeUsage-menubar/\(appVersion)", forHTTPHeaderField: "User-Agent")
+    request.setValue(Provider.betaHeader.1, forHTTPHeaderField: Provider.betaHeader.0)
+    request.setValue("\(Provider.userAgent)/\(appVersion)", forHTTPHeaderField: "User-Agent")
 
     let (data, response): (Data, URLResponse)
     do {
@@ -334,11 +383,13 @@ func colorForPercentage(_ pct: Int) -> NSColor {
 // MARK: - Snapshot Helpers
 
 func loadSnapshots() -> [UsageSnapshot] {
-    guard let data = UserDefaults.standard.data(forKey: UDKey.usageHistory),
-          let snapshots = try? JSONDecoder().decode([UsageSnapshot].self, from: data) else {
+    guard let data = UserDefaults.standard.data(forKey: UDKey.usageHistory) else { return [] }
+    do {
+        return try JSONDecoder().decode([UsageSnapshot].self, from: data)
+    } catch {
+        NSLog("loadSnapshots: failed to decode usage history: %@", error.localizedDescription)
         return []
     }
-    return snapshots
 }
 
 func saveSnapshot(pct: Double) {
@@ -353,8 +404,11 @@ func saveSnapshot(pct: Double) {
         snapshots = Array(snapshots.suffix(100))
     }
 
-    if let data = try? JSONEncoder().encode(snapshots) {
+    do {
+        let data = try JSONEncoder().encode(snapshots)
         UserDefaults.standard.set(data, forKey: UDKey.usageHistory)
+    } catch {
+        NSLog("saveSnapshot: failed to encode usage history: %@", error.localizedDescription)
     }
 }
 
@@ -411,7 +465,7 @@ func cachedActiveModel() -> String? {
 /// Finds the most-used model across all projects in ~/.claude.json
 /// by summing output tokens, so the menu bar shows the relevant model.
 func readActiveModel() -> String? {
-    let claudeJson = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude.json")
+    let claudeJson = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(Provider.configFile)
     let data: Data
     do {
         data = try Data(contentsOf: claudeJson)
@@ -449,7 +503,7 @@ func readActiveModel() -> String? {
 
 func shortModelName(_ modelId: String) -> String {
     let parts = modelId.lowercased().split(separator: "-")
-    let families = ["opus", "sonnet", "haiku"]
+    let families = Provider.modelFamilies
     for part in parts {
         if families.contains(String(part)) {
             return String(part)
@@ -464,11 +518,17 @@ func shortModelName(_ modelId: String) -> String {
 /// Semantic version comparison: returns true if `remote` is newer than `local`.
 /// Strips "v" prefix and any pre-release suffix (e.g. "-beta"), splits by ".",
 /// compares numerically with zero-padding for unequal lengths.
+/// When numeric versions are equal, a clean release is newer than a pre-release
+/// (e.g. "2.8.1" is newer than "2.8.1-beta").
 func isNewerVersion(remote: String, local: String) -> Bool {
     func normalize(_ v: String) -> [Int] {
         let stripped = v.hasPrefix("v") ? String(v.dropFirst()) : v
         let base = stripped.split(separator: "-").first.map(String.init) ?? stripped
         return base.split(separator: ".").compactMap { Int($0) }
+    }
+    func hasPreRelease(_ v: String) -> Bool {
+        let stripped = v.hasPrefix("v") ? String(v.dropFirst()) : v
+        return stripped.contains("-")
     }
     let r = normalize(remote)
     let l = normalize(local)
@@ -479,7 +539,8 @@ func isNewerVersion(remote: String, local: String) -> Bool {
         if rv > lv { return true }
         if rv < lv { return false }
     }
-    return false
+    // Same numeric version: a clean release is newer than a pre-release
+    return hasPreRelease(local) && !hasPreRelease(remote)
 }
 
 /// Checks GitHub for the latest release, at most once per 24 hours.
@@ -490,10 +551,10 @@ func checkForUpdate() async {
     let lastCheck = defaults.double(forKey: UDKey.lastUpdateCheckTime)
     if lastCheck > 0 && Date().timeIntervalSince1970 - lastCheck < 86400 { return }  // 86400 = 24 hours in seconds
 
-    guard let url = URL(string: "https://api.github.com/repos/Kevinjohn/claude-usage-swift/releases/latest") else { return }
+    guard let url = URL(string: Provider.releasesAPI) else { return }
     var request = URLRequest(url: url)
     request.timeoutInterval = 15
-    request.setValue("ClaudeUsage-menubar/\(appVersion)", forHTTPHeaderField: "User-Agent")
+    request.setValue("\(Provider.userAgent)/\(appVersion)", forHTTPHeaderField: "User-Agent")
 
     let data: Data
     let response: URLResponse
@@ -773,11 +834,11 @@ extension AppDelegate {
     private func buildMenu() -> NSMenu {
         let menu = NSMenu()
 
-        headerItem = NSMenuItem(title: "Claude Code usage:", action: nil, keyEquivalent: "")
-        fiveHourItem = NSMenuItem(title: "5-hour: ...", action: nil, keyEquivalent: "")
-        weeklyItem = NSMenuItem(title: "Weekly: ...", action: nil, keyEquivalent: "")
-        sonnetItem = NSMenuItem(title: "Sonnet: ...", action: nil, keyEquivalent: "")
-        extraItem = NSMenuItem(title: "Extra: ...", action: nil, keyEquivalent: "")
+        headerItem = NSMenuItem(title: Provider.appName, action: nil, keyEquivalent: "")
+        fiveHourItem = NSMenuItem(title: "\(Provider.primaryLabel): ...", action: nil, keyEquivalent: "")
+        weeklyItem = NSMenuItem(title: "\(Provider.weeklyLabel): ...", action: nil, keyEquivalent: "")
+        sonnetItem = NSMenuItem(title: "\(Provider.modelLabel): ...", action: nil, keyEquivalent: "")
+        extraItem = NSMenuItem(title: "\(Provider.extraLabel): ...", action: nil, keyEquivalent: "")
         rateItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
         rateItem.isHidden = true
         updatedItem = NSMenuItem(title: "Updated: --", action: nil, keyEquivalent: "")
@@ -853,11 +914,11 @@ extension AppDelegate {
             menuBarTextMenu.addItem(item)
         }
         menuBarTextMenu.addItem(NSMenuItem.separator())
-        showWeeklyLabelItem = NSMenuItem(title: "Weekly", action: #selector(toggleWeeklyLabel), keyEquivalent: "")
+        showWeeklyLabelItem = NSMenuItem(title: Provider.weeklyLabel, action: #selector(toggleWeeklyLabel), keyEquivalent: "")
         showWeeklyLabelItem.target = self
         showWeeklyLabelItem.state = showWeeklyLabel ? .on : .off
         menuBarTextMenu.addItem(showWeeklyLabelItem)
-        showSonnetLabelItem = NSMenuItem(title: "Sonnet", action: #selector(toggleSonnetLabel), keyEquivalent: "")
+        showSonnetLabelItem = NSMenuItem(title: Provider.modelLabel, action: #selector(toggleSonnetLabel), keyEquivalent: "")
         showSonnetLabelItem.target = self
         showSonnetLabelItem.state = showSonnetLabel ? .on : .off
         menuBarTextMenu.addItem(showSonnetLabelItem)
@@ -877,7 +938,7 @@ extension AppDelegate {
             weeklyModeItems.append(item)
             weeklyMenu.addItem(item)
         }
-        showWeeklyItem = NSMenuItem(title: "Display weekly usage", action: nil, keyEquivalent: "")
+        showWeeklyItem = NSMenuItem(title: "Display \(Provider.weeklyLabel.lowercased()) usage", action: nil, keyEquivalent: "")
         showWeeklyItem.submenu = weeklyMenu
         menu.addItem(showWeeklyItem)
 
@@ -892,7 +953,7 @@ extension AppDelegate {
             sonnetModeItems.append(item)
             sonnetDisplayMenu.addItem(item)
         }
-        showSonnetItem = NSMenuItem(title: "Display sonnet usage", action: nil, keyEquivalent: "")
+        showSonnetItem = NSMenuItem(title: "Display \(Provider.modelLabel.lowercased()) usage", action: nil, keyEquivalent: "")
         showSonnetItem.submenu = sonnetDisplayMenu
         menu.addItem(showSonnetItem)
 
@@ -917,7 +978,7 @@ extension AppDelegate {
         menu.addItem(NSMenuItem.separator())
 
         // Action items
-        let dashboardItem = NSMenuItem(title: "Open platform.claude.com", action: #selector(openDashboard), keyEquivalent: "d")
+        let dashboardItem = NSMenuItem(title: Provider.dashboardLabel, action: #selector(openDashboard), keyEquivalent: "d")
         dashboardItem.target = self
         menu.addItem(dashboardItem)
 
@@ -967,7 +1028,7 @@ extension AppDelegate {
             item.tag = pct
             thresholdMenu.addItem(item)
         }
-        let thresholdItem = NSMenuItem(title: "Test 5 Hours", action: nil, keyEquivalent: "")
+        let thresholdItem = NSMenuItem(title: "Test \(Provider.primaryLabel)", action: nil, keyEquivalent: "")
         thresholdItem.submenu = thresholdMenu
         testMenu.addItem(thresholdItem)
 
@@ -984,7 +1045,7 @@ extension AppDelegate {
             item.tag = pct
             weeklyTestMenu.addItem(item)
         }
-        let weeklyTestItem = NSMenuItem(title: "Test Weekly", action: nil, keyEquivalent: "")
+        let weeklyTestItem = NSMenuItem(title: "Test \(Provider.weeklyLabel)", action: nil, keyEquivalent: "")
         weeklyTestItem.submenu = weeklyTestMenu
         testMenu.addItem(weeklyTestItem)
 
@@ -1001,7 +1062,7 @@ extension AppDelegate {
             item.tag = pct
             sonnetTestMenu.addItem(item)
         }
-        let sonnetTestItem = NSMenuItem(title: "Test Sonnet", action: nil, keyEquivalent: "")
+        let sonnetTestItem = NSMenuItem(title: "Test \(Provider.modelLabel)", action: nil, keyEquivalent: "")
         sonnetTestItem.submenu = sonnetTestMenu
         testMenu.addItem(sonnetTestItem)
 
@@ -1020,8 +1081,8 @@ extension AppDelegate {
         let infoFont = menuBarFont
         let infoAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: gray, .font: infoFont]
 
-        let repoItem = NSMenuItem(title: "Kevinjohn/claude-usage-swift v\(appVersion)", action: nil, keyEquivalent: "")
-        repoItem.attributedTitle = NSAttributedString(string: "Kevinjohn/claude-usage-swift v\(appVersion)", attributes: infoAttrs)
+        let repoItem = NSMenuItem(title: "\(Provider.repoSlug) v\(appVersion)", action: nil, keyEquivalent: "")
+        repoItem.attributedTitle = NSAttributedString(string: "\(Provider.repoSlug) v\(appVersion)", attributes: infoAttrs)
         repoItem.isEnabled = false
         menu.addItem(repoItem)
 
@@ -1143,25 +1204,17 @@ extension AppDelegate {
             setMenuBarText("...")
         }
 
-        Task {
+        Task { @MainActor in
+            defer { self.isRefreshing = false }
             do {
                 let token = try await getOAuthToken()
                 let usage = try await fetchUsage(token: token)
-                await MainActor.run {
-                    self.activeModelName = cachedActiveModel()
-                    self.updateUI(usage: usage)
-                    self.isRefreshing = false
-                }
+                self.activeModelName = cachedActiveModel()
+                self.updateUI(usage: usage)
             } catch let error as UsageError {
-                await MainActor.run {
-                    self.showError(error)
-                    self.isRefreshing = false
-                }
+                self.showError(error)
             } catch {
-                await MainActor.run {
-                    self.showError(.networkError(error))
-                    self.isRefreshing = false
-                }
+                self.showError(.networkError(error))
             }
         }
     }
@@ -1172,15 +1225,15 @@ extension AppDelegate {
 
         // 5-hour
         if let h = usage.five_hour {
-            let pct = Int(h.utilization)
+            let pct = min(100, max(0, Int(h.utilization)))
             // Detect transition from >0% to 0% (usage reset) and notify the user
-            if let prev = fiveHourPct, prev > 0, pct == 0 { sendResetNotification(category: "5-hour") }
+            if let prev = fiveHourPct, prev > 0, pct == 0 { sendResetNotification(category: Provider.primaryLabel) }
             fiveHourPct = pct
             fiveHourResetString = h.resets_at
             updateMenuBarText()
             let reset = h.resets_at.map { formatReset($0) } ?? "--"
-            fiveHourItem.title = "5-hour: \(pct)% (resets \(reset))"
-            fiveHourItem.attributedTitle = tabbedMenuItemString(left: "5-hour: \(pct)%", right: "(resets \(reset))")
+            fiveHourItem.title = "\(Provider.primaryLabel): \(pct)% (resets \(reset))"
+            fiveHourItem.attributedTitle = tabbedMenuItemString(left: "\(Provider.primaryLabel): \(pct)%", right: "(resets \(reset))")
 
             // New reset timestamp means a new usage cycle — clear stale state
             let storedResetAt = UserDefaults.standard.string(forKey: UDKey.lastResetAt)
@@ -1196,7 +1249,7 @@ extension AppDelegate {
             }
 
             // Save snapshot and update rate
-            saveSnapshot(pct: h.utilization)
+            saveSnapshot(pct: min(100, max(0, h.utilization)))
             if let rateStr = computeRateString() {
                 rateItem.title = rateStr
                 rateItem.isHidden = false
@@ -1210,38 +1263,38 @@ extension AppDelegate {
             fiveHourPct = nil
             fiveHourResetString = nil
             setMenuBarText("N/A")
-            fiveHourItem.title = "5-hour: N/A"
+            fiveHourItem.title = "\(Provider.primaryLabel): N/A"
             fiveHourItem.attributedTitle = nil
             rateItem.isHidden = true
         }
 
         // Weekly
         if let d = usage.seven_day {
-            let weeklyPct = Int(d.utilization)
-            if let prev = previousWeeklyPct, prev > 0, weeklyPct == 0 { sendResetNotification(category: "Weekly") }
+            let weeklyPct = min(100, max(0, Int(d.utilization)))
+            if let prev = previousWeeklyPct, prev > 0, weeklyPct == 0 { sendResetNotification(category: Provider.weeklyLabel) }
             previousWeeklyPct = weeklyPct
             cachedWeeklyPct = weeklyPct
             let reset = d.resets_at.map { formatReset($0) } ?? "--"
-            weeklyItem.title = "Weekly: \(weeklyPct)% (resets \(reset))"
-            weeklyItem.attributedTitle = tabbedMenuItemString(left: "Weekly: \(weeklyPct)%", right: "(resets \(reset))")
+            weeklyItem.title = "\(Provider.weeklyLabel): \(weeklyPct)% (resets \(reset))"
+            weeklyItem.attributedTitle = tabbedMenuItemString(left: "\(Provider.weeklyLabel): \(weeklyPct)%", right: "(resets \(reset))")
         } else {
             cachedWeeklyPct = nil
-            weeklyItem.title = "Weekly: --"
+            weeklyItem.title = "\(Provider.weeklyLabel): --"
             weeklyItem.attributedTitle = nil
         }
 
         // Sonnet
         if let s = usage.seven_day_sonnet {
-            let sonnetPct = Int(s.utilization)
-            if let prev = previousSonnetPct, prev > 0, sonnetPct == 0 { sendResetNotification(category: "Sonnet") }
+            let sonnetPct = min(100, max(0, Int(s.utilization)))
+            if let prev = previousSonnetPct, prev > 0, sonnetPct == 0 { sendResetNotification(category: Provider.modelLabel) }
             previousSonnetPct = sonnetPct
             cachedSonnetPct = sonnetPct
             let reset = s.resets_at.map { formatReset($0) } ?? "--"
-            sonnetItem.title = "Sonnet: \(sonnetPct)% (resets \(reset))"
-            sonnetItem.attributedTitle = tabbedMenuItemString(left: "Sonnet: \(sonnetPct)%", right: "(resets \(reset))")
+            sonnetItem.title = "\(Provider.modelLabel): \(sonnetPct)% (resets \(reset))"
+            sonnetItem.attributedTitle = tabbedMenuItemString(left: "\(Provider.modelLabel): \(sonnetPct)%", right: "(resets \(reset))")
         } else {
             cachedSonnetPct = nil
-            sonnetItem.title = "Sonnet: --"
+            sonnetItem.title = "\(Provider.modelLabel): --"
             sonnetItem.attributedTitle = nil
         }
 
@@ -1249,14 +1302,14 @@ extension AppDelegate {
         if let e = usage.extra_usage, e.is_enabled,
            let used = e.used_credits, let limit = e.monthly_limit, let util = e.utilization {
             let extraPct = Int(util)
-            if let prev = previousExtraPct, prev > 0, extraPct == 0 { sendResetNotification(category: "Extra") }
+            if let prev = previousExtraPct, prev > 0, extraPct == 0 { sendResetNotification(category: Provider.extraLabel) }
             previousExtraPct = extraPct
-            let leftExtra = String(format: "Extra: $%.2f/$%.0f", used / 100, limit / 100)
+            let leftExtra = String(format: "\(Provider.extraLabel): $%.2f/$%.0f", used / 100, limit / 100)
             let rightExtra = String(format: "(%.0f%%)", util)
             extraItem.title = "\(leftExtra) \(rightExtra)"
             extraItem.attributedTitle = tabbedMenuItemString(left: leftExtra, right: rightExtra)
         } else {
-            extraItem.title = "Extra: --"
+            extraItem.title = "\(Provider.extraLabel): --"
             extraItem.attributedTitle = nil
         }
 
@@ -1337,10 +1390,10 @@ extension AppDelegate {
         guard let pct = fiveHourPct else { return }
         let prefix: String
         switch menuBarTextMode {
-        case "claude": prefix = "Claude: "
-        case "cc":     prefix = "CC: "
+        case "claude": prefix = Provider.prefixBrand
+        case "cc":     prefix = Provider.prefixShort
         case "model":  prefix = activeModelName.map { "\($0): " } ?? ""
-        case "5hour":  prefix = "5 Hour: "
+        case "5hour":  prefix = Provider.prefixPrimary
         default:       prefix = ""
         }
         // Show dynamic icon when active AND either not idle or user opted to always show the idle icon
@@ -1379,83 +1432,97 @@ extension AppDelegate {
             staleText = " (stale)"
         }
 
-        // Build attributed string with per-section colors when extra sections are shown.
-        // Progressively abbreviates to fit within ~25% of screen width:
-        //   Level 0: full labels   "opus: 75% / 2h 37m | weekly: 72% | sonnet: 85%"
-        //   Level 1: short labels  "opus: 75% / 2h 37m | w: 72% | s: 85%"
-        //   Level 2: no countdown  "opus: 75% | w: 72% | s: 85%"
-        //   Level 3: no prefix     "75% | w: 72% | s: 85%"
         if weeklyPctValue != nil || sonnetPctValue != nil {
-            let font = menuBarFont
             // WHY 25% of screen width: leaves room for system icons (clock, WiFi, battery,
             // Control Center ~200pt) and other menu bar apps, while adapting to different
             // display sizes (360pt on 1440pt laptop, 640pt on 2560pt external monitor)
             let screenWidth = statusItem.button?.window?.screen?.frame.width ?? NSScreen.main?.frame.width ?? 1440
             let maxTextWidth = screenWidth * 0.25
-            // WHY 16pt: NSStatusBarButton adds ~12pt horizontal padding plus our 1pt border
-            // on each side, which isn't included in NSAttributedString.size().width
-            let buttonPadding: CGFloat = 16
-
-            for level in 0...3 {
-                let mainText: String
-                if level >= 3 {
-                    mainText = "\(pct)%\(suffix)"
-                } else if level >= 2 {
-                    mainText = "\(prefix)\(pct)%\(suffix)"
-                } else {
-                    mainText = text
-                }
-                // WHY default to short labels when both shown: two full labels
-                // ("weekly:" + "sonnet:") add ~20 extra characters that push past
-                // comfortable menu bar width even without a prefix
-                let bothShown = weeklyPctValue != nil && sonnetPctValue != nil
-                let shortLabels = bothShown || level >= 1
-
-                let result = NSMutableAttributedString()
-                result.append(NSAttributedString(string: mainText, attributes: [
-                    .foregroundColor: color,
-                    .font: font
-                ]))
-                if let weeklyPct = weeklyPctValue {
-                    let weeklyColor = colorForPercentage(weeklyPct)
-                    let weeklyText = shortLabels
-                        ? (showWeeklyLabel ? " | w: \(weeklyPct)%" : " | \(weeklyPct)%")
-                        : (showWeeklyLabel ? " | weekly: \(weeklyPct)%" : " | \(weeklyPct)%")
-                    result.append(NSAttributedString(string: weeklyText, attributes: [
-                        .foregroundColor: weeklyColor,
-                        .font: font
-                    ]))
-                }
-                if let sonnetPct = sonnetPctValue {
-                    let sonnetColor = colorForPercentage(sonnetPct)
-                    let sonnetText = shortLabels
-                        ? (showSonnetLabel ? " | s: \(sonnetPct)%" : " | \(sonnetPct)%")
-                        : (showSonnetLabel ? " | sonnet: \(sonnetPct)%" : " | \(sonnetPct)%")
-                    result.append(NSAttributedString(string: sonnetText, attributes: [
-                        .foregroundColor: sonnetColor,
-                        .font: font
-                    ]))
-                }
-                if !staleText.isEmpty {
-                    result.append(NSAttributedString(string: staleText, attributes: [
-                        .foregroundColor: color,
-                        .font: font
-                    ]))
-                }
-
-                // WHY always accept level 3: an invisible status item is worse than
-                // abbreviated text — the shortest format must always render
-                if result.size().width + buttonPadding <= maxTextWidth || level == 3 {
-                    setMenuBarAttributedText(result, borderColor: color)
-                    break
-                }
-            }
+            let (attributed, borderColor) = abbreviatedMenuBarText(
+                fullText: text, pct: pct, prefix: prefix, suffix: suffix,
+                weeklyPct: weeklyPctValue, sonnetPct: sonnetPctValue,
+                staleText: staleText, primaryColor: color, maxTextWidth: maxTextWidth
+            )
+            setMenuBarAttributedText(attributed, borderColor: borderColor)
         } else {
             text += staleText
             setMenuBarText(text, color: color)
         }
 
         verifyMenuBarVisibility()
+    }
+
+    /// Builds a progressively abbreviated attributed string for the menu bar.
+    /// Tries 4 levels of abbreviation until the text fits within maxTextWidth:
+    ///   Level 0: full labels   "opus: 75% / 2h 37m | weekly: 72% | sonnet: 85%"
+    ///   Level 1: short labels  "opus: 75% / 2h 37m | w: 72% | s: 85%"
+    ///   Level 2: no countdown  "opus: 75% | w: 72% | s: 85%"
+    ///   Level 3: no prefix     "75% | w: 72% | s: 85%"
+    private func abbreviatedMenuBarText(
+        fullText: String, pct: Int, prefix: String, suffix: String,
+        weeklyPct: Int?, sonnetPct: Int?,
+        staleText: String, primaryColor: NSColor, maxTextWidth: CGFloat
+    ) -> (NSAttributedString, NSColor) {
+        let font = menuBarFont
+        // WHY 16pt: NSStatusBarButton adds ~12pt horizontal padding plus our 1pt border
+        // on each side, which isn't included in NSAttributedString.size().width
+        let buttonPadding: CGFloat = 16
+
+        for level in 0...3 {
+            let mainText: String
+            if level >= 3 {
+                mainText = "\(pct)%\(suffix)"
+            } else if level >= 2 {
+                mainText = "\(prefix)\(pct)%\(suffix)"
+            } else {
+                mainText = fullText
+            }
+            // WHY default to short labels when both shown: two full labels
+            // ("weekly:" + "sonnet:") add ~20 extra characters that push past
+            // comfortable menu bar width even without a prefix
+            let bothShown = weeklyPct != nil && sonnetPct != nil
+            let shortLabels = bothShown || level >= 1
+
+            let result = NSMutableAttributedString()
+            result.append(NSAttributedString(string: mainText, attributes: [
+                .foregroundColor: primaryColor,
+                .font: font
+            ]))
+            if let weeklyPct = weeklyPct {
+                let weeklyColor = colorForPercentage(weeklyPct)
+                let weeklyText = shortLabels
+                    ? (showWeeklyLabel ? " | \(Provider.weeklyShort) \(weeklyPct)%" : " | \(weeklyPct)%")
+                    : (showWeeklyLabel ? " | \(Provider.weeklyLabel.lowercased()): \(weeklyPct)%" : " | \(weeklyPct)%")
+                result.append(NSAttributedString(string: weeklyText, attributes: [
+                    .foregroundColor: weeklyColor,
+                    .font: font
+                ]))
+            }
+            if let sonnetPct = sonnetPct {
+                let sonnetColor = colorForPercentage(sonnetPct)
+                let sonnetText = shortLabels
+                    ? (showSonnetLabel ? " | \(Provider.modelShort) \(sonnetPct)%" : " | \(sonnetPct)%")
+                    : (showSonnetLabel ? " | \(Provider.modelLabel.lowercased()): \(sonnetPct)%" : " | \(sonnetPct)%")
+                result.append(NSAttributedString(string: sonnetText, attributes: [
+                    .foregroundColor: sonnetColor,
+                    .font: font
+                ]))
+            }
+            if !staleText.isEmpty {
+                result.append(NSAttributedString(string: staleText, attributes: [
+                    .foregroundColor: primaryColor,
+                    .font: font
+                ]))
+            }
+
+            // WHY always accept level 3: an invisible status item is worse than
+            // abbreviated text — the shortest format must always render
+            if result.size().width + buttonPadding <= maxTextWidth || level == 3 {
+                return (result, primaryColor)
+            }
+        }
+        // Unreachable: loop always returns at level 3, but Swift requires a return
+        return (NSAttributedString(string: "\(pct)%", attributes: [.foregroundColor: primaryColor, .font: font]), primaryColor)
     }
 
     /// Best-effort check that the status item is actually visible after layout.
@@ -1536,13 +1603,13 @@ extension AppDelegate {
             fiveHourResetString = nil
             cachedWeeklyPct = nil
             cachedSonnetPct = nil
-            fiveHourItem.title = "5-hour: --"
+            fiveHourItem.title = "\(Provider.primaryLabel): --"
             fiveHourItem.attributedTitle = nil
-            weeklyItem.title = "Weekly: --"
+            weeklyItem.title = "\(Provider.weeklyLabel): --"
             weeklyItem.attributedTitle = nil
-            sonnetItem.title = "Sonnet: --"
+            sonnetItem.title = "\(Provider.modelLabel): --"
             sonnetItem.attributedTitle = nil
-            extraItem.title = "Extra: --"
+            extraItem.title = "\(Provider.extraLabel): --"
             extraItem.attributedTitle = nil
             rateItem.isHidden = true
 
@@ -1627,14 +1694,14 @@ extension AppDelegate {
             headerItem.action = #selector(openReleasesPage)
             headerItem.target = self
         } else {
-            headerItem.title = "Claude Code usage:"
+            headerItem.title = Provider.appName
             headerItem.action = nil
             headerItem.target = nil
         }
     }
 
     @objc func openReleasesPage() {
-        if let url = URL(string: "https://github.com/Kevinjohn/claude-usage-swift/releases/latest") {
+        if let url = URL(string: Provider.releasesURL) {
             NSWorkspace.shared.open(url)
         }
     }
@@ -1688,7 +1755,7 @@ extension AppDelegate {
     }
 
     @objc func openDashboard() {
-        if let url = URL(string: "https://console.anthropic.com/settings/usage") {
+        if let url = URL(string: Provider.dashboardURL) {
             NSWorkspace.shared.open(url)
         }
     }
@@ -1722,7 +1789,7 @@ extension AppDelegate {
 
     @objc func testPercentage(_ sender: NSMenuItem) {
         displayMode = .test
-        let pct = sender.tag
+        let pct = min(100, max(0, sender.tag))
 
         var resetStr = fiveHourResetString
         if resetStr == nil {
@@ -1735,7 +1802,7 @@ extension AppDelegate {
 
     @objc func testWeekly(_ sender: NSMenuItem) {
         displayMode = .test
-        let weeklyPct = sender.tag
+        let weeklyPct = min(100, max(0, sender.tag))
 
         // Use current 5-hour data or a sensible default
         let pct = fiveHourPct ?? 45
@@ -1753,7 +1820,7 @@ extension AppDelegate {
             .foregroundColor: color,
             .font: font
         ]))
-        let weeklyText = showWeeklyLabel ? " | weekly: \(weeklyPct)%" : " | \(weeklyPct)%"
+        let weeklyText = showWeeklyLabel ? " | \(Provider.weeklyLabel.lowercased()): \(weeklyPct)%" : " | \(weeklyPct)%"
         result.append(NSAttributedString(string: weeklyText, attributes: [
             .foregroundColor: weeklyColor,
             .font: font
@@ -1763,7 +1830,7 @@ extension AppDelegate {
 
     @objc func testSonnet(_ sender: NSMenuItem) {
         displayMode = .test
-        let sonnetPct = sender.tag
+        let sonnetPct = min(100, max(0, sender.tag))
 
         let pct = fiveHourPct ?? 45
         var resetStr = fiveHourResetString
@@ -1780,7 +1847,7 @@ extension AppDelegate {
             .foregroundColor: color,
             .font: font
         ]))
-        let sonnetText = showSonnetLabel ? " | sonnet: \(sonnetPct)%" : " | \(sonnetPct)%"
+        let sonnetText = showSonnetLabel ? " | \(Provider.modelLabel.lowercased()): \(sonnetPct)%" : " | \(sonnetPct)%"
         result.append(NSAttributedString(string: sonnetText, attributes: [
             .foregroundColor: sonnetColor,
             .font: font

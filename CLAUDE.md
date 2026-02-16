@@ -23,12 +23,13 @@ Requires macOS 12.0+, Swift 5.9+, and Xcode Command Line Tools.
 
 ## Architecture
 
-Everything lives in `ClaudeUsage.swift` (~1690 lines), organized as:
+Everything lives in `ClaudeUsage.swift` (~1900 lines), organized as:
 
 - **Version constant**: `appVersion` — single source of truth for version string, extracted by `build.sh` into Info.plist
 - **Data models** (top): `UsageResponse`, `UsageLimit`, `ExtraUsage` — Codable structs matching the Anthropic OAuth usage API response; `UsageSnapshot` for tracking usage history
 - **`DisplayThresholds` enum**: caseless enum (namespace pattern) with centralised static config for color breakpoints (30/61/81/91%) and countdown detail thresholds (30/61%)
 - **`UDKey` enum**: centralised `private enum UDKey` with static string constants for all UserDefaults keys, preventing typo bugs
+- **`Provider` enum**: centralised `private enum Provider` with all provider-specific branding, URLs, API details, category labels, credential paths, and model families — change this one block to fork the app for a different provider; all inline references throughout the file use `Provider.xxx` constants
 - **Ephemeral URLSession**: module-level `urlSession` using `URLSessionConfiguration.ephemeral` to prevent disk caching of API responses
 - **Cached constants**: module-level `menuBarFont` (11pt monospaced-digit), `menuItemTabLocation` (dropdown column alignment width) — avoids repeated allocation
 - **`UsageError` enum**: structured error type with cases `keychainNotFound`, `keychainParseFailure`, `networkError`, `httpError`, `decodingError` — each provides a `menuBarText` (e.g. `"key?"`, `"network?"`, `"auth?"`, `"rate limit?"`) and a `description` for the dropdown menu; `menuBarColor` computed property returns `.systemRed` for HTTP 429 (rate limit) and `.systemYellow` for all other errors; `hint` property returns actionable guidance for every error type, rendered as separate menu items for multiline readability
@@ -37,15 +38,15 @@ Everything lives in `ClaudeUsage.swift` (~1690 lines), organized as:
 - **Networking (async)**: `getOAuthToken()` runs `/usr/bin/security` on a background queue via `withCheckedThrowingContinuation` with a 15s subprocess timeout to avoid blocking the main thread; `fetchUsage()` uses `urlSession.data(for:)` with a 15s request timeout — both throw `UsageError`
 - **Formatting helpers**: `formatReset()`, `formatResetDate(_:hoursOnly:)`, `formatResetHoursOnly()` — convert ISO8601 timestamps to human-readable countdowns; `formatResetDate` accepts a `hoursOnly` parameter to share logic between full and abbreviated formats
 - **Color helper**: `colorForPercentage()` maps usage percentage to NSColor using `DisplayThresholds` breakpoints — grey (<30%), green (30–60%), yellow (61–80%), orange (81–90%, `.systemOrange` for dark/light mode adaptation), red (91%+)
-- **Snapshot helpers**: `loadSnapshots()`, `saveSnapshot(pct:)`, `computeRateString()` — track usage over time, compute %/hr rate and estimated time to limit
+- **Snapshot helpers**: `loadSnapshots()`, `saveSnapshot(pct:)`, `computeRateString()` — track usage over time, compute %/hr rate and estimated time to limit; encoding/decoding failures logged via `NSLog` for diagnostics
 - **Model detection**: `readActiveModel()` reads `~/.claude.json` to find the most-used model across projects; `cachedActiveModel()` wraps it with a 5-minute cache to avoid re-parsing on every refresh; `shortModelName()` converts full model IDs (e.g. `claude-opus-4-6`) to short lowercase names (`opus`, `sonnet`, `haiku`); both functions log errors via `NSLog` for debugging
-- **Update checker**: `isNewerVersion(remote:local:)` performs semantic version comparison with prefix/suffix stripping and zero-padding; `checkForUpdate()` queries the GitHub Releases API at most once per 24 hours and caches the result in UserDefaults; logs errors via `NSLog` for debugging
+- **Update checker**: `isNewerVersion(remote:local:)` performs semantic version comparison with prefix/suffix stripping and zero-padding; treats a clean release as newer than a pre-release with the same numeric version (e.g. `2.8.1` > `2.8.1-beta`); `checkForUpdate()` queries the GitHub Releases API at most once per 24 hours and caches the result in UserDefaults; logs errors via `NSLog` for debugging
 - **Dynamic refresh ladder**: module-level `dynamicRefreshLadder` constant `[60, 120, 300, 900]` — tiers for adaptive polling
 - **AppDelegate** (main class): all stored/computed properties, `applicationDidFinishLaunching`, `applicationWillTerminate`, `startDisplayTimer()`, `handleSleep()`, `handleWake()`
 - **AppDelegate extensions** (5 logical groups, each with `// MARK: -` for Xcode jump-bar navigation):
   - **Menu Construction**: `buildMenu()` — constructs the full dropdown NSMenu
   - **Refresh & Timer**: `updateIntervalMenu()`, `restartTimer()` (includes 10% timer tolerance for power efficiency), `adjustDynamicInterval(newPct:)` (core dynamic refresh logic: steps down on usage increase, steps up after 2 unchanged cycles), `updateDynamicStatusItem()`, `toggleDynamicRefresh()`, `setInterval(_:)`, `refresh()`, `updateUI(usage:)`
-  - **Display**: `setMenuBarText(_:color:)` (11pt monospaced-digit font; adds a 1px rounded outline box around the menu bar text using the button's CALayer, with 50% opacity border color matching the usage color and 4pt corner radius), `setMenuBarAttributedText(_:borderColor:)` (multi-colored `NSMutableAttributedString` support for weekly/sonnet sections with independent colors), `applyMenuBarBorder(color:)` (private helper extracting shared CALayer border logic), `tabbedMenuItemString(left:right:)` (creates `NSAttributedString` with left-aligned tab stop for column-aligned reset times in dropdown), `generateMenuBarText(pct:resetString:prefix:suffix:)` (shared by `updateMenuBarText()` and `testPercentage()`), `updateMenuBarText()` (includes progressive abbreviation — measures `NSAttributedString.size().width` against 25% of screen width and tries 4 levels: full labels → short labels → no countdown → no prefix; when both weekly and sonnet are shown, always uses short labels `w:`/`s:`), `verifyMenuBarVisibility()` (post-layout safety net — dispatches async to check the button's window is on-screen after macOS layout; if hidden, recovers with minimal `XX%` text and sends a one-time macOS notification), `showError(_:)` (displays colored error text in menu bar — yellow by default, red for 429 — and error hint section with actionable guidance; in test mode, preserves cached state so `clearTestDisplay()` restores instantly without an API call), `updateRelativeTime()`
+  - **Display**: `setMenuBarText(_:color:)` (11pt monospaced-digit font; adds a 1px rounded outline box around the menu bar text using the button's CALayer, with 50% opacity border color matching the usage color and 4pt corner radius), `setMenuBarAttributedText(_:borderColor:)` (multi-colored `NSMutableAttributedString` support for weekly/sonnet sections with independent colors), `applyMenuBarBorder(color:)` (private helper extracting shared CALayer border logic), `tabbedMenuItemString(left:right:)` (creates `NSAttributedString` with left-aligned tab stop for column-aligned reset times in dropdown), `generateMenuBarText(pct:resetString:prefix:suffix:)` (shared by `updateMenuBarText()` and `testPercentage()`), `updateMenuBarText()` (orchestrates menu bar text rendering; delegates to `abbreviatedMenuBarText()` when weekly/sonnet sections are shown), `abbreviatedMenuBarText()` (private helper that progressively abbreviates to fit within ~25% of screen width — 4 levels: full labels → short labels → no countdown → no prefix; when both weekly and sonnet are shown, always uses short labels `w:`/`s:`), `verifyMenuBarVisibility()` (post-layout safety net — dispatches async to check the button's window is on-screen after macOS layout; if hidden, recovers with minimal `XX%` text and sends a one-time macOS notification), `showError(_:)` (displays colored error text in menu bar — yellow by default, red for 429 — and error hint section with actionable guidance; in test mode, preserves cached state so `clearTestDisplay()` restores instantly without an API call), `updateRelativeTime()`
   - **Alerts**: `sendResetNotification(category:)` fires a macOS notification when a usage category resets to 0%; `toggleResetNotifications()` toggles the "Notifications > Reset to 0%" menu item
   - **User Actions**: `updateHeaderFromCache()`, `openReleasesPage()`, `setMenuBarTextMode(_:)`, `updateMenuBarTextModeMenu()`, `toggleWeeklyLabel()`, `toggleSonnetLabel()`, `setWeeklyMode(_:)`, `updateWeeklyModeMenu()`, `setSonnetMode(_:)`, `updateSonnetModeMenu()`, `openDashboard()`, `copyUsage()`, `toggleLaunchAtLogin()`, `testPercentage(_:)`, `testWeekly(_:)`, `testSonnet(_:)`, `testError(_:)`, `clearTestDisplay()`, `quit()`
   - `effectiveInterval` — computed property returning `refreshInterval` when dynamic is off, or the current tier interval when on
@@ -54,7 +55,7 @@ Everything lives in `ClaudeUsage.swift` (~1690 lines), organized as:
 
 Key design decisions:
 - Runs as a UIElement (LSUIElement=true) — no dock icon
-- Credentials come from Claude Code's Keychain entry ("Claude Code-credentials"), so Claude Code must be installed and logged in
+- Credentials come from Claude Code's Keychain entry (`Provider.keychainService`), so Claude Code must be installed and logged in
 - Refresh interval is user-configurable (1/5/15/30/60 min, default 30 min) and persisted via UserDefaults
 - Menu bar shows percentage + inline countdown with adaptive detail: <30% percentage only, 30–60% adds hours, 61%+ shows full h:m countdown
 - A `displayTimer` (60s, 10s tolerance) updates the countdown text and relative time between API refreshes
@@ -69,7 +70,7 @@ Key design decisions:
 - Menu bar visibility safety net: `verifyMenuBarVisibility()` runs on the next run-loop iteration after setting text, checking if the button's window is on-screen (macOS hides status items that don't fit rather than truncating). If hidden, recovers by falling back to minimal `XX%` text and sends a one-time macOS notification ("Menu bar text shortened") explaining the situation. `didNotifyMenuBarHidden` flag resets when the item becomes visible again
 - Launch at Login via SMAppService (macOS 13+)
 - Menu bar uses 11pt monospaced-digit system font for compact, aligned display, wrapped in a subtle 1px rounded outline box (50% opacity, 4pt corner radius) for visual distinction
-- `refresh()` uses `Task {}` with async/await; UI updates run on `MainActor`
+- `refresh()` uses `Task { @MainActor in }` with async/await and `defer` for guaranteed `isRefreshing` cleanup; `getOAuthToken()` and `fetchUsage()` internally escape to background queues so networking never blocks the main thread
 - `applicationWillTerminate` invalidates both timers and removes notification observers
 - Sleep/wake awareness: observes `willSleepNotification`, `didWakeNotification`, `screensDidSleepNotification`, and `screensDidWakeNotification` to fully stop all timers during system sleep and display sleep, ensuring zero CPU/network activity when the user is away; on wake, timers restart and an immediate refresh fetches fresh data
 - Timer tolerance: both timers set a `tolerance` (10s for display, 10% of interval for API refresh, minimum 10s) so macOS can coalesce wake-ups with other system activity, reducing battery impact
@@ -80,4 +81,10 @@ Key design decisions:
 
 ## Testing
 
-No automated test suite. Test manually by building and running the app. The app requires Claude Code to be logged in for Keychain access to work.
+`Tests.swift` contains standalone unit tests for pure functions (`isNewerVersion`, `colorForPercentage`, percentage clamping):
+
+```bash
+swiftc -O -o Tests Tests.swift && ./Tests
+```
+
+For integration testing, build and run the app manually. The app requires Claude Code to be logged in for Keychain access to work.
